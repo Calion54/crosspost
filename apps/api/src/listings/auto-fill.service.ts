@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Anthropic from '@anthropic-ai/sdk';
 import { ListingCondition } from '@crosspost/shared';
 import type { AutoFillDto, AutoFillResult } from '@crosspost/shared';
+import { LlmService } from '../common/llm/llm.service.js';
 
 const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans les annonces de vente en ligne (Leboncoin, Vinted, etc.).
 À partir du titre et de la description d'une annonce, tu dois extraire et deviner les informations suivantes.
@@ -28,13 +27,8 @@ Règles :
 @Injectable()
 export class AutoFillService {
   private readonly logger = new Logger(AutoFillService.name);
-  private client: Anthropic;
 
-  constructor(private configService: ConfigService) {
-    this.client = new Anthropic({
-      apiKey: this.configService.get<string>('ANTHROPIC_API_KEY'),
-    });
-  }
+  constructor(private llm: LlmService) {}
 
   async autoFill(dto: AutoFillDto): Promise<AutoFillResult> {
     const userMessage = [
@@ -44,11 +38,10 @@ export class AutoFillService {
       .filter(Boolean)
       .join('\n');
 
-    const response = await this.client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
+    const response = await this.llm.createMessage({
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 256,
     });
 
     const text =

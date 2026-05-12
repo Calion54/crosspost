@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Page } from 'playwright';
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
+import type { LlmService } from '../common/llm/llm.service.js';
 import type { ScrapeDebugService } from '../common/debug/scrape-debug.service.js';
 
 const TOOLS: Anthropic.Tool[] = [
@@ -97,11 +98,8 @@ export interface AgentContext {
 
 export class BrowserAgent {
   private readonly logger = new Logger(BrowserAgent.name);
-  private client: Anthropic;
 
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
-  }
+  constructor(private readonly llm: LlmService) {}
 
   async run(ctx: AgentContext): Promise<void> {
     const MAX_TURNS = 30;
@@ -115,15 +113,19 @@ export class BrowserAgent {
     await this.saveSnapshot(ctx, snapshotCount++, lastPageState);
 
     const listingInfo = `Données de l'annonce :\n${JSON.stringify(ctx.listingData, null, 2)}\n\nImages : ${ctx.imageCount} photo(s) à uploader.`;
+    const actionLog: string[] = [];
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
+      let content = `${listingInfo}\n\nÉtat actuel de la page :\n${lastPageState}`;
+      if (actionLog.length > 0) {
+        content += `\n\nHistorique des actions :\n${actionLog.join('\n')}`;
+      }
+
       const messages: Anthropic.MessageParam[] = [
-        { role: 'user', content: `${listingInfo}\n\nÉtat actuel de la page :\n${lastPageState}` },
+        { role: 'user', content },
       ];
 
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+      const response = await this.llm.createMessage({
         system: ctx.systemPrompt,
         tools: TOOLS,
         messages,
@@ -149,14 +151,12 @@ export class BrowserAgent {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
 
-        this.logger.debug(`[agent] → ${block.name} ${JSON.stringify(block.input)}`);
+        const input = block.input as Record<string, string>;
+        this.logger.debug(`[agent] → ${block.name} ${JSON.stringify(input)}`);
 
-        const result = await this.executeTool(
-          ctx,
-          block.name,
-          block.input as Record<string, string>,
-          imagesUploaded,
-        );
+        const result = await this.executeTool(ctx, block.name, input, imagesUploaded);
+
+        actionLog.push(`${block.name}(${Object.values(input).join(', ')}): ${result.output}`);
 
         if (block.name === 'upload_images' && result.success) {
           imagesUploaded = true;
@@ -172,7 +172,17 @@ export class BrowserAgent {
         ctx.onStep?.(block.name);
       }
 
-      // Capture fresh page state for next turn
+      // Wait for page to settle before capturing state
+      try {
+        await ctx.page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+        await ctx.page.waitForSelector(
+          'input, textarea, select, [role="combobox"], [role="option"], h1, h2, h3',
+          { timeout: 5000 },
+        );
+        // Wait for network to settle — catches lazy-loaded form fields
+        await ctx.page.waitForLoadState('networkidle', { timeout: 3000 });
+      } catch { /* page may legitimately have no form fields */ }
+
       lastPageState = await this.capturePageState(ctx.page);
       this.logger.debug(`[agent] Page state (${lastPageState.length} chars):\n${lastPageState}`);
 
@@ -355,8 +365,21 @@ export class BrowserAgent {
         return '';
       }
 
+      function isFormRelevant(el: Element): boolean {
+        // Skip elements inside site chrome (header, nav, footer)
+        if (el.closest('header, nav, footer')) return false;
+        // Skip skip-nav / anchor links (e.g. "aller au contenu")
+        const href = el.getAttribute('href');
+        if (href && href.startsWith('#')) return false;
+        // Skip external links (not part of the form)
+        if (el.tagName === 'A' && href && !href.startsWith('#') && !el.closest('form, [role="listbox"], [role="dialog"], [role="menu"]')) {
+          return false;
+        }
+        return true;
+      }
+
       function add(el: Element) {
-        if (seen.has(el) || !isVisible(el)) return;
+        if (seen.has(el) || !isVisible(el) || !isFormRelevant(el)) return;
         seen.add(el);
 
         const tag = el.tagName.toLowerCase();

@@ -5,6 +5,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { LlmModule } from './common/llm/llm.module.js';
 import { EncryptionModule } from './common/crypto/encryption.module.js';
 import { ScrapeDebugModule } from './common/debug/scrape-debug.module.js';
 import { BrowserModule } from './browser/browser.module.js';
@@ -24,6 +25,7 @@ import { PublishModule } from './publish/publish.module.js';
         uri: config.get<string>('MONGODB_URI', 'mongodb://localhost:27017/crosspost'),
       }),
     }),
+    LlmModule,
     EncryptionModule,
     ScrapeDebugModule,
     BrowserModule,

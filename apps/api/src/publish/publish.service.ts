@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -14,6 +13,7 @@ import {
 } from '../publications/schemas/publication.schema.js';
 import { BrowserService } from '../browser/browser.service.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
+import { LlmService } from '../common/llm/llm.service.js';
 import { ScrapeDebugService } from '../common/debug/scrape-debug.service.js';
 import { MediaService } from '../media/media.service.js';
 import { BrowserAgent } from './browser-agent.js';
@@ -48,13 +48,11 @@ export class PublishService {
     private publicationModel: Model<PublicationDocument>,
     private browserService: BrowserService,
     private encryptionService: EncryptionService,
+    private llmService: LlmService,
     private scrapeDebug: ScrapeDebugService,
     private mediaService: MediaService,
-    private configService: ConfigService,
   ) {
-    this.agent = new BrowserAgent(
-      this.configService.get<string>('ANTHROPIC_API_KEY')!,
-    );
+    this.agent = new BrowserAgent(this.llmService);
   }
 
   getPublishStatus(sessionId: string): PublishSession | null {
