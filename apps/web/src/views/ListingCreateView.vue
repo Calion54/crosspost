@@ -3,11 +3,23 @@
     <div class="d-flex align-center mb-4">
       <v-btn icon="mdi-arrow-left" variant="text" to="/listings" />
       <h1 class="text-h4 ml-2">Nouvelle annonce</h1>
+      <v-spacer />
+      <v-btn
+        color="secondary"
+        variant="tonal"
+        size="small"
+        :loading="autoFilling"
+        :disabled="!canAutoFill"
+        @click="onAutoFill"
+      >
+        <v-icon start size="small">mdi-auto-fix</v-icon>
+        Auto-remplir (IA)
+      </v-btn>
     </div>
 
-    <v-card class="pa-4">
-      <v-form @submit.prevent="onSubmit">
-        <!-- Titre + Description (obligatoires) -->
+    <v-form @submit.prevent="onSubmit">
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Informations principales</p>
         <v-text-field
           v-model="form.title"
           label="Titre"
@@ -21,68 +33,86 @@
           :rules="[rules.required, rules.minLength(10)]"
           counter="4000"
           maxlength="4000"
-          rows="4"
+          rows="3"
           auto-grow
         />
+        <v-row>
+          <v-col cols="6">
+            <v-text-field
+              v-model.number="form.price"
+              label="Prix"
+              type="number"
+              prefix="EUR"
+              :rules="[rules.required, rules.positive]"
+              hide-details="auto"
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-text-field
+              v-model="form.category"
+              label="Categorie"
+              hide-details="auto"
+            />
+          </v-col>
+        </v-row>
+      </v-card>
 
-        <!-- Bouton auto-fill -->
-        <v-btn
-          color="secondary"
-          variant="tonal"
-          :loading="autoFilling"
-          :disabled="!canAutoFill"
-          class="mb-4"
-          @click="onAutoFill"
-        >
-          <v-icon start>mdi-auto-fix</v-icon>
-          Auto-remplir avec l'IA
-        </v-btn>
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Details du produit</p>
+        <v-row>
+          <v-col cols="6">
+            <v-select
+              v-model="form.condition"
+              :items="conditions"
+              label="Etat"
+              clearable
+              hide-details="auto"
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-text-field v-model="form.brand" label="Marque" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-text-field v-model="form.size" label="Taille" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-text-field v-model="form.color" label="Couleur" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-select
+              v-model="form.packageSize"
+              :items="packageSizes"
+              label="Taille du colis"
+              :rules="[rules.required]"
+              hide-details="auto"
+            />
+          </v-col>
+        </v-row>
+      </v-card>
 
-        <v-divider class="mb-4" />
-
-        <!-- Prix (obligatoire) -->
-        <v-text-field
-          v-model.number="form.price"
-          label="Prix"
-          type="number"
-          prefix="EUR"
-          :rules="[rules.required, rules.positive]"
-        />
-
-        <!-- Champs auto-remplissables -->
-        <v-text-field v-model="form.category" label="Categorie" />
-        <v-select
-          v-model="form.condition"
-          :items="conditions"
-          label="Etat"
-          clearable
-        />
-        <v-text-field v-model="form.brand" label="Marque" />
-        <v-text-field v-model="form.size" label="Taille" />
-        <v-text-field v-model="form.color" label="Couleur" />
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Localisation & photos</p>
         <v-text-field
           v-model="form.location"
           label="Adresse"
           placeholder="ex: Paris (75011)"
           prepend-inner-icon="mdi-map-marker"
+          class="mb-2"
         />
+        <MediaUpload v-model="form.media" />
+      </v-card>
 
-        <v-divider class="my-4" />
-
-        <!-- Photos -->
-        <MediaUpload v-model="form.media" class="mb-4" />
-
-        <v-btn
-          type="submit"
-          color="primary"
-          size="large"
-          :loading="submitting"
-          :disabled="!canSubmit"
-        >
-          Creer l'annonce
-        </v-btn>
-      </v-form>
-    </v-card>
+      <v-btn
+        type="submit"
+        color="primary"
+        size="large"
+        block
+        :loading="submitting"
+        :disabled="!canSubmit"
+      >
+        Creer l'annonce
+      </v-btn>
+    </v-form>
 
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000">
       {{ snackbar.text }}
@@ -93,7 +123,7 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ListingCondition } from '@crosspost/shared';
+import { ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillResult, ListingMedia } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
@@ -106,6 +136,12 @@ const conditions = [
   { title: 'Tres bon etat', value: ListingCondition.VERY_GOOD },
   { title: 'Bon etat', value: ListingCondition.GOOD },
   { title: 'Etat correct', value: ListingCondition.FAIR },
+];
+
+const packageSizes = [
+  { title: 'S — Petit (enveloppe, petite boite)', value: PackageSize.S },
+  { title: 'M — Moyen (boite a chaussures)', value: PackageSize.M },
+  { title: 'L — Grand (carton volumineux)', value: PackageSize.L },
 ];
 
 const rules = {
@@ -124,7 +160,8 @@ const form = reactive({
   brand: '',
   size: '',
   color: '',
-  location: '',
+  packageSize: (localStorage.getItem('listing.packageSize') as PackageSize | null) || null,
+  location: localStorage.getItem('listing.location') || '',
   media: [] as ListingMedia[],
 });
 
@@ -134,7 +171,7 @@ const snackbar = reactive({ show: false, text: '', color: 'success' });
 
 const canAutoFill = computed(() => form.title.length >= 3);
 const canSubmit = computed(
-  () => form.title.length >= 3 && form.description.length >= 10 && (form.price ?? 0) > 0,
+  () => form.title.length >= 3 && form.description.length >= 10 && (form.price ?? 0) > 0 && !!form.packageSize,
 );
 
 async function onAutoFill() {
@@ -150,6 +187,7 @@ async function onAutoFill() {
     if (data.brand && !form.brand) form.brand = data.brand;
     if (data.size && !form.size) form.size = data.size;
     if (data.color && !form.color) form.color = data.color;
+    if (data.packageSize && !form.packageSize) form.packageSize = data.packageSize;
     if (data.suggestedPrice && !form.price) form.price = data.suggestedPrice;
 
     snackbar.text = 'Champs remplis par l\'IA';
@@ -178,9 +216,13 @@ async function onSubmit() {
     if (form.brand) payload.brand = form.brand;
     if (form.size) payload.size = form.size;
     if (form.color) payload.color = form.color;
+    payload.packageSize = form.packageSize;
     if (form.location) payload.location = form.location;
 
     await apiClient.post('/listings', payload);
+
+    if (form.location) localStorage.setItem('listing.location', form.location);
+    if (form.packageSize) localStorage.setItem('listing.packageSize', form.packageSize);
 
     snackbar.text = 'Annonce creee';
     snackbar.color = 'success';

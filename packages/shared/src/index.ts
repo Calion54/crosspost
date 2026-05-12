@@ -3,3 +3,4 @@ export * from './dto/publication.dto';
 export * from './enums/platform.enum';
 export * from './enums/publication-status.enum';
 export * from './enums/listing-condition.enum';
+export * from './enums/package-size.enum';

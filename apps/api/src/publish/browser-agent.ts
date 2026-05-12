@@ -101,7 +101,7 @@ export class BrowserAgent {
 
   constructor(private readonly llm: LlmService) {}
 
-  async run(ctx: AgentContext): Promise<void> {
+  async run(ctx: AgentContext): Promise<boolean> {
     const MAX_TURNS = 30;
     let imagesUploaded = false;
     let snapshotCount = 0;
@@ -112,8 +112,11 @@ export class BrowserAgent {
     let lastPageState = await this.capturePageState(ctx.page);
     await this.saveSnapshot(ctx, snapshotCount++, lastPageState);
 
+    const MIN_ACTIONS_BEFORE_DONE = 3;
     const listingInfo = `Données de l'annonce :\n${JSON.stringify(ctx.listingData, null, 2)}\n\nImages : ${ctx.imageCount} photo(s) à uploader.`;
     const actionLog: string[] = [];
+    let successfulActions = 0;
+    let submitted = false;
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       let content = `${listingInfo}\n\nÉtat actuel de la page :\n${lastPageState}`;
@@ -142,27 +145,53 @@ export class BrowserAgent {
       );
 
       if (response.stop_reason === 'end_turn') {
-        this.logger.debug('[agent] LLM ended turn — done');
-        break;
+        if (successfulActions >= MIN_ACTIONS_BEFORE_DONE) {
+          this.logger.debug('[agent] LLM ended turn after sufficient actions — treating as done');
+          submitted = true;
+          break;
+        }
+        this.logger.warn(`[agent] LLM ended turn with no tool calls (only ${successfulActions} actions done) — retrying`);
+        actionLog.push('SYSTEM: No tool calls received. Look at the page state carefully and use the available tools to fill the form.');
+        continue;
       }
 
       let isDone = false;
 
-      for (const block of response.content) {
+      const toolBlocks = response.content.filter((b) => b.type === 'tool_use');
+      // Execute at most 2 tool calls per turn to force the agent to observe
+      const blocksToRun = toolBlocks.slice(0, 2);
+      if (toolBlocks.length > blocksToRun.length) {
+        this.logger.debug(
+          `[agent] Limiting from ${toolBlocks.length} to ${blocksToRun.length} tool calls this turn`,
+        );
+      }
+
+      for (const block of blocksToRun) {
         if (block.type !== 'tool_use') continue;
 
         const input = block.input as Record<string, string>;
         this.logger.debug(`[agent] → ${block.name} ${JSON.stringify(input)}`);
 
+        // Guard: reject premature done
+        if (block.name === 'done' && successfulActions < MIN_ACTIONS_BEFORE_DONE) {
+          this.logger.warn(`[agent] Rejected premature done (only ${successfulActions} actions done)`);
+          actionLog.push(`done(): REJECTED — you must fill the form before calling done. Only ${successfulActions} actions completed so far.`);
+          continue;
+        }
+
         const result = await this.executeTool(ctx, block.name, input, imagesUploaded);
 
         actionLog.push(`${block.name}(${Object.values(input).join(', ')}): ${result.output}`);
 
+        if (result.success && block.name !== 'done') {
+          successfulActions++;
+        }
         if (block.name === 'upload_images' && result.success) {
           imagesUploaded = true;
         }
         if (block.name === 'done') {
           isDone = true;
+          submitted = true;
         }
 
         if (block.name !== 'done') {
@@ -195,6 +224,12 @@ export class BrowserAgent {
     this.logger.log(
       `[agent] Tokens used — input: ${totalInputTokens}, output: ${totalOutputTokens}, total: ${totalInputTokens + totalOutputTokens}`,
     );
+
+    if (!submitted) {
+      this.logger.warn(`[agent] Agent exited without submitting (${successfulActions} actions done)`);
+    }
+
+    return submitted;
   }
 
   private async executeTool(

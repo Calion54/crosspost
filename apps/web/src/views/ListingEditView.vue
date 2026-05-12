@@ -3,12 +3,25 @@
     <div class="d-flex align-center mb-4">
       <v-btn icon="mdi-arrow-left" variant="text" to="/listings" />
       <h1 class="text-h4 ml-2">Modifier l'annonce</h1>
+      <v-spacer />
+      <v-btn
+        color="secondary"
+        variant="tonal"
+        size="small"
+        :loading="autoFilling"
+        :disabled="!form.title || form.title.length < 3"
+        @click="onAutoFill"
+      >
+        <v-icon start size="small">mdi-auto-fix</v-icon>
+        Auto-remplir (IA)
+      </v-btn>
     </div>
 
-    <v-skeleton-loader v-if="loading" type="card" />
+    <v-skeleton-loader v-if="loading" type="card,card,card" />
 
-    <v-card v-else class="pa-4">
-      <v-form @submit.prevent="onSubmit">
+    <v-form v-else @submit.prevent="onSubmit">
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Informations principales</p>
         <v-text-field
           v-model="form.title"
           label="Titre"
@@ -20,147 +33,84 @@
           label="Description"
           counter="4000"
           maxlength="4000"
-          rows="4"
+          rows="3"
           auto-grow
         />
+        <v-row>
+          <v-col cols="6">
+            <v-text-field
+              v-model.number="form.price"
+              label="Prix"
+              type="number"
+              prefix="EUR"
+              hide-details="auto"
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-text-field
+              v-model="form.category"
+              label="Categorie"
+              hide-details="auto"
+            />
+          </v-col>
+        </v-row>
+      </v-card>
 
-        <v-btn
-          color="secondary"
-          variant="tonal"
-          :loading="autoFilling"
-          :disabled="!form.title || form.title.length < 3"
-          class="mb-4"
-          @click="onAutoFill"
-        >
-          <v-icon start>mdi-auto-fix</v-icon>
-          Auto-remplir avec l'IA
-        </v-btn>
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Details du produit</p>
+        <v-row>
+          <v-col cols="6">
+            <v-select
+              v-model="form.condition"
+              :items="conditions"
+              label="Etat"
+              clearable
+              hide-details="auto"
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-text-field v-model="form.brand" label="Marque" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-text-field v-model="form.size" label="Taille" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-text-field v-model="form.color" label="Couleur" hide-details="auto" />
+          </v-col>
+          <v-col cols="4">
+            <v-select
+              v-model="form.packageSize"
+              :items="packageSizes"
+              label="Taille du colis"
+              hide-details="auto"
+            />
+          </v-col>
+        </v-row>
+      </v-card>
 
-        <v-divider class="mb-4" />
-
-        <v-text-field
-          v-model.number="form.price"
-          label="Prix"
-          type="number"
-          prefix="EUR"
-        />
-        <v-text-field v-model="form.category" label="Categorie" />
-        <v-select
-          v-model="form.condition"
-          :items="conditions"
-          label="Etat"
-          clearable
-        />
-        <v-text-field v-model="form.brand" label="Marque" />
-        <v-text-field v-model="form.size" label="Taille" />
-        <v-text-field v-model="form.color" label="Couleur" />
+      <v-card class="pa-4 mb-4">
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Localisation & photos</p>
         <v-text-field
           v-model="form.location"
           label="Adresse"
           placeholder="ex: Paris (75011)"
           prepend-inner-icon="mdi-map-marker"
+          class="mb-2"
         />
-
-        <v-divider class="my-4" />
-
-        <MediaUpload v-model="form.media" :media-urls="mediaUrls" class="mb-4" />
-
-        <v-btn
-          type="submit"
-          color="primary"
-          size="large"
-          :loading="submitting"
-        >
-          Sauvegarder
-        </v-btn>
-      </v-form>
-    </v-card>
-
-    <!-- Publication section -->
-    <v-card class="pa-4 mt-4" v-if="!loading">
-      <p class="text-subtitle-1 mb-3">Publication</p>
-
-      <!-- Existing publications -->
-      <div v-if="publications.length" class="mb-3">
-        <v-chip
-          v-for="pub in publications"
-          :key="pub._id"
-          :color="statusColor(pub.status)"
-          :href="pub.externalUrl || undefined"
-          :target="pub.externalUrl ? '_blank' : undefined"
-          class="mr-2 mb-1"
-          :prepend-icon="platformIcon(pub.platform)"
-        >
-          {{ platformLabel(pub.platform) }} — {{ pub.status }}
-        </v-chip>
-      </div>
-
-      <!-- Publish buttons -->
-      <div class="d-flex ga-2">
-        <v-btn
-          v-for="acc in publishableAccounts"
-          :key="acc._id"
-          color="primary"
-          variant="tonal"
-          :prepend-icon="platformIcon(acc.platform)"
-          :loading="publishingTo[acc._id]"
-          @click="onPublish(acc._id, acc.platform)"
-        >
-          Publier sur {{ platformLabel(acc.platform) }}
-        </v-btn>
-        <p
-          v-if="!publishableAccounts.length && !publications.length"
-          class="text-medium-emphasis text-caption"
-        >
-          Aucun compte connecte disponible.
-          <router-link to="/accounts">Connecter un compte</router-link>
-        </p>
-      </div>
-    </v-card>
-
-    <!-- Publish progress dialog -->
-    <v-dialog v-model="publishDialog.show" max-width="400" persistent>
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon :icon="platformIcon(publishDialog.platform)" class="mr-2" />
-          Publication en cours
-        </v-card-title>
-        <v-card-text>
-          <div class="d-flex align-center mb-2">
-            <v-progress-circular
-              v-if="publishDialog.status === 'publishing'"
-              indeterminate
-              size="20"
-              width="2"
-              class="mr-3"
-            />
-            <v-icon
-              v-else-if="publishDialog.status === 'success'"
-              color="success"
-              class="mr-3"
-            >mdi-check-circle</v-icon>
-            <v-icon
-              v-else-if="publishDialog.status === 'error'"
-              color="error"
-              class="mr-3"
-            >mdi-alert-circle</v-icon>
-            <span>{{ publishDialog.stepLabel }}</span>
-          </div>
-          <p v-if="publishDialog.error" class="text-error text-caption mt-2">
-            {{ publishDialog.error }}
-          </p>
-          <p v-if="publishDialog.externalUrl" class="mt-2">
-            <a :href="publishDialog.externalUrl" target="_blank">
-              Voir l'annonce publiee
-            </a>
-          </p>
-        </v-card-text>
-        <v-card-actions v-if="publishDialog.status !== 'publishing'">
-          <v-spacer />
-          <v-btn @click="publishDialog.show = false; stopPolling()">Fermer</v-btn>
-        </v-card-actions>
+        <MediaUpload v-model="form.media" :media-urls="mediaUrls" />
       </v-card>
-    </v-dialog>
+
+      <v-btn
+        type="submit"
+        color="primary"
+        size="large"
+        block
+        :loading="submitting"
+        class="mb-4"
+      >
+        Sauvegarder
+      </v-btn>
+    </v-form>
 
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000">
       {{ snackbar.text }}
@@ -169,9 +119,9 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, onUnmounted } from 'vue';
+import { reactive, ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ListingCondition } from '@crosspost/shared';
+import { ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillResult, ListingMedia } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
@@ -188,6 +138,12 @@ const conditions = [
   { title: 'Etat correct', value: ListingCondition.FAIR },
 ];
 
+const packageSizes = [
+  { title: 'S — Petit (enveloppe, petite boite)', value: PackageSize.S },
+  { title: 'M — Moyen (boite a chaussures)', value: PackageSize.M },
+  { title: 'L — Grand (carton volumineux)', value: PackageSize.L },
+];
+
 const form = reactive({
   title: '',
   description: '',
@@ -197,6 +153,7 @@ const form = reactive({
   brand: '',
   size: '',
   color: '',
+  packageSize: null as PackageSize | null,
   location: '',
   media: [] as ListingMedia[],
 });
@@ -207,73 +164,9 @@ const autoFilling = ref(false);
 const submitting = ref(false);
 const snackbar = reactive({ show: false, text: '', color: 'success' });
 
-// --- Publication state ---
-const publications = ref<any[]>([]);
-const accounts = ref<any[]>([]);
-const publishingTo = reactive<Record<string, boolean>>({});
-let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-const STEP_LABELS: Record<string, string> = {
-  starting: 'Demarrage...',
-  navigating: 'Navigation vers le formulaire...',
-  filling_form: 'Remplissage du formulaire...',
-  uploading_images: 'Upload des photos...',
-  pre_submit_review: 'Verification avant soumission...',
-  submitting: 'Soumission de l\'annonce...',
-  verifying: 'Verification de la publication...',
-};
-
-const publishDialog = reactive({
-  show: false,
-  status: '' as string,
-  platform: '' as string,
-  stepLabel: '',
-  error: '',
-  externalUrl: '',
-});
-
-const publishableAccounts = computed(() => {
-  const publishedPlatforms = new Set(
-    publications.value
-      .filter((p: any) => ['published', 'pending'].includes(p.status))
-      .map((p: any) => p.platform),
-  );
-  return accounts.value.filter(
-    (a) => a.isConnected && !publishedPlatforms.has(a.platform),
-  );
-});
-
-function platformIcon(platform: string) {
-  if (platform === 'leboncoin') return 'mdi-alpha-l-box';
-  if (platform === 'vinted') return 'mdi-alpha-v-box';
-  return 'mdi-web';
-}
-
-function platformLabel(platform: string) {
-  if (platform === 'leboncoin') return 'Leboncoin';
-  if (platform === 'vinted') return 'Vinted';
-  return platform;
-}
-
-function statusColor(status: string) {
-  const colors: Record<string, string> = {
-    published: 'success',
-    draft: 'default',
-    pending: 'warning',
-    failed: 'error',
-    removed: 'grey',
-  };
-  return colors[status] || 'default';
-}
-
 onMounted(async () => {
   try {
-    const [listingRes, accountsRes] = await Promise.all([
-      apiClient.get(`/listings/${id}`),
-      apiClient.get('/accounts'),
-    ]);
-
-    const data = listingRes.data;
+    const { data } = await apiClient.get(`/listings/${id}`);
     form.title = data.title || '';
     form.description = data.description || '';
     form.price = data.price || null;
@@ -282,11 +175,10 @@ onMounted(async () => {
     form.brand = data.brand || '';
     form.size = data.size || '';
     form.color = data.color || '';
+    form.packageSize = data.packageSize || null;
     form.location = data.location || '';
     form.media = data.media || [];
     mediaUrls.value = data.mediaUrls || [];
-    publications.value = data.publications || [];
-    accounts.value = accountsRes.data;
   } catch {
     snackbar.text = 'Annonce introuvable';
     snackbar.color = 'error';
@@ -295,8 +187,6 @@ onMounted(async () => {
     loading.value = false;
   }
 });
-
-onUnmounted(() => stopPolling());
 
 async function onAutoFill() {
   autoFilling.value = true;
@@ -311,6 +201,7 @@ async function onAutoFill() {
     if (data.brand) form.brand = data.brand;
     if (data.size) form.size = data.size;
     if (data.color) form.color = data.color;
+    if (data.packageSize && !form.packageSize) form.packageSize = data.packageSize;
 
     snackbar.text = 'Champs remplis par l\'IA';
     snackbar.color = 'success';
@@ -338,6 +229,7 @@ async function onSubmit() {
     if (form.brand) payload.brand = form.brand;
     if (form.size) payload.size = form.size;
     if (form.color) payload.color = form.color;
+    if (form.packageSize) payload.packageSize = form.packageSize;
     if (form.location) payload.location = form.location;
 
     await apiClient.patch(`/listings/${id}`, payload);
@@ -353,59 +245,6 @@ async function onSubmit() {
     snackbar.show = true;
   } finally {
     submitting.value = false;
-  }
-}
-
-async function onPublish(accountId: string, platform: string) {
-  publishingTo[accountId] = true;
-  publishDialog.show = true;
-  publishDialog.status = 'publishing';
-  publishDialog.platform = platform;
-  publishDialog.stepLabel = STEP_LABELS['starting'];
-  publishDialog.error = '';
-  publishDialog.externalUrl = '';
-
-  try {
-    const { data } = await apiClient.post('/publish', { listingId: id, accountId });
-    const sessionId = data.sessionId;
-
-    pollTimer = setInterval(async () => {
-      try {
-        const { data: status } = await apiClient.get(`/publish/${sessionId}/status`);
-        publishDialog.stepLabel = STEP_LABELS[status.step] || status.step || '';
-
-        if (status.status === 'success') {
-          publishDialog.status = 'success';
-          publishDialog.stepLabel = 'Annonce publiee avec succes !';
-          publishDialog.externalUrl = status.externalUrl || '';
-          stopPolling();
-          publishingTo[accountId] = false;
-          // Refresh publications
-          const { data: updated } = await apiClient.get(`/listings/${id}`);
-          publications.value = updated.publications || [];
-        } else if (status.status === 'error') {
-          publishDialog.status = 'error';
-          publishDialog.stepLabel = 'Echec de la publication';
-          publishDialog.error = status.error || 'Erreur inconnue';
-          stopPolling();
-          publishingTo[accountId] = false;
-        }
-      } catch {
-        // Polling error, continue
-      }
-    }, 2000);
-  } catch (err: any) {
-    publishDialog.status = 'error';
-    publishDialog.stepLabel = 'Echec de la publication';
-    publishDialog.error = err.response?.data?.message || err.message;
-    publishingTo[accountId] = false;
-  }
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
   }
 }
 </script>

@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { ListingCondition } from '@crosspost/shared';
+import { ListingCondition, PackageSize } from '@crosspost/shared';
 
 export type ListingDocument = HydratedDocument<Listing>;
 
@@ -37,6 +37,9 @@ export class Listing {
 
   @Prop()
   color?: string;
+
+  @Prop({ type: String, required: true })
+  packageSize: PackageSize;
 
   @Prop()
   location?: string;

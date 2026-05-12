@@ -18,11 +18,6 @@
           to="/listings"
         />
         <v-list-item
-          prepend-icon="mdi-publish"
-          title="Publications"
-          to="/publications"
-        />
-        <v-list-item
           prepend-icon="mdi-account-multiple"
           title="Comptes"
           to="/accounts"

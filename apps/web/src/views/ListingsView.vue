@@ -3,17 +3,6 @@
     <div class="d-flex align-center mb-4">
       <h1 class="text-h4">Mes annonces</h1>
       <v-spacer />
-      <v-select
-        v-if="accountOptions.length"
-        v-model="selectedAccountId"
-        :items="accountOptions"
-        label="Filtrer par compte"
-        clearable
-        density="compact"
-        hide-details
-        class="mr-4"
-        style="max-width: 250px"
-      />
       <v-btn color="primary" prepend-icon="mdi-plus" to="/listings/new">
         Nouvelle annonce
       </v-btn>
@@ -22,61 +11,83 @@
     <v-table>
       <thead>
         <tr>
+          <th style="width: 80px"></th>
           <th>Titre</th>
           <th>Prix</th>
-          <th>Publication</th>
+          <th>Plateformes</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-if="!filteredListings.length">
-          <td colspan="4" class="text-center text-medium-emphasis pa-4">
+        <tr v-if="!listings.length">
+          <td colspan="5" class="text-center text-medium-emphasis pa-4">
             Aucune annonce pour le moment
           </td>
         </tr>
-        <tr v-for="listing in filteredListings" :key="listing._id">
-          <td>{{ listing.title }}</td>
-          <td>{{ listing.price }} EUR</td>
+        <tr v-for="listing in listings" :key="listing._id">
           <td>
-            <!-- Platform publication status chips -->
-            <div class="d-flex ga-1 align-center">
-              <v-chip
-                v-for="pub in listing.publications"
-                :key="pub._id"
-                :color="statusColor(pub.status)"
-                :href="pub.externalUrl || undefined"
-                :target="pub.externalUrl ? '_blank' : undefined"
-                size="small"
-                :prepend-icon="platformIcon(pub.platform)"
-              >
-                {{ platformLabel(pub.platform) }}
-                <template #append>
-                  <v-icon
-                    v-if="pub.status === 'published'"
-                    size="x-small"
-                    class="ml-1"
-                  >mdi-check-circle</v-icon>
-                  <v-icon
-                    v-else-if="pub.status === 'failed'"
-                    size="x-small"
-                    class="ml-1"
-                  >mdi-alert-circle</v-icon>
-                </template>
-              </v-chip>
-
-              <!-- Show missing platforms as "not published" -->
-              <v-chip
-                v-for="platform in missingPlatforms(listing)"
+            <v-img
+              v-if="listing.mediaUrls?.length"
+              :src="listing.mediaUrls[0]"
+              width="60"
+              height="60"
+              cover
+              class="rounded my-1"
+            />
+            <div
+              v-else
+              class="d-flex align-center justify-center rounded bg-grey-lighten-3 my-1"
+              style="width: 60px; height: 60px"
+            >
+              <v-icon color="grey" size="24">mdi-image-off</v-icon>
+            </div>
+          </td>
+          <td>{{ listing.title }}</td>
+          <td>{{ listing.price }} &euro;</td>
+          <td>
+            <div class="d-flex ga-3 align-center">
+              <v-tooltip
+                v-for="platform in ALL_PLATFORMS"
                 :key="platform"
-                size="small"
-                variant="outlined"
-                :prepend-icon="platformIcon(platform)"
+                :text="platformTooltip(listing, platform)"
               >
-                {{ platformLabel(platform) }}
-              </v-chip>
+                <template #activator="{ props: tooltipProps }">
+                  <a
+                    v-bind="tooltipProps"
+                    :href="getPublicationUrl(listing, platform) || undefined"
+                    :target="getPublicationUrl(listing, platform) ? '_blank' : undefined"
+                    class="d-inline-block"
+                    :style="{ opacity: getPublicationStatus(listing, platform) ? 1 : 0.35 }"
+                  >
+                    <v-badge
+                      :color="platformBadgeColor(listing, platform)"
+                      dot
+                      location="bottom end"
+                      offset-x="2"
+                      offset-y="2"
+                    >
+                      <v-avatar size="28" rounded="lg">
+                        <v-img :src="platformImage(platform)" :alt="platformLabel(platform)" />
+                      </v-avatar>
+                    </v-badge>
+                  </a>
+                </template>
+              </v-tooltip>
             </div>
           </td>
           <td>
+            <v-tooltip text="Publier">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  icon="mdi-publish"
+                  size="small"
+                  variant="text"
+                  color="primary"
+                  @click="openPublishModal(listing)"
+                />
+              </template>
+            </v-tooltip>
             <v-tooltip text="Modifier">
               <template #activator="{ props }">
                 <v-btn
@@ -88,37 +99,6 @@
                 />
               </template>
             </v-tooltip>
-
-            <!-- Publish menu -->
-            <v-menu>
-              <template #activator="{ props }">
-                <v-btn
-                  v-bind="props"
-                  icon="mdi-publish"
-                  size="small"
-                  variant="text"
-                  color="primary"
-                  :disabled="!canPublish(listing)"
-                />
-              </template>
-              <v-list density="compact">
-                <v-list-item
-                  v-for="acc in publishableAccounts(listing)"
-                  :key="acc._id"
-                  :prepend-icon="platformIcon(acc.platform)"
-                  :title="`Publier sur ${platformLabel(acc.platform)}`"
-                  :subtitle="acc.username"
-                  :disabled="publishing[listing._id]"
-                  @click="onPublish(listing._id, acc._id, acc.platform)"
-                />
-                <v-list-item
-                  v-if="publishableAccounts(listing).length === 0"
-                  title="Aucun compte disponible"
-                  disabled
-                />
-              </v-list>
-            </v-menu>
-
             <v-tooltip text="Supprimer">
               <template #activator="{ props }">
                 <v-btn
@@ -136,46 +116,84 @@
       </tbody>
     </v-table>
 
-    <!-- Publish progress dialog -->
-    <v-dialog v-model="publishDialog.show" max-width="400" persistent>
+    <div v-if="totalPages > 1" class="d-flex justify-center mt-4">
+      <v-pagination v-model="page" :length="totalPages" rounded />
+    </div>
+
+    <!-- Publish modal — select accounts with checkboxes -->
+    <v-dialog v-model="publishModal.show" max-width="450">
       <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon :icon="platformIcon(publishDialog.platform)" class="mr-2" />
-          Publication en cours
-        </v-card-title>
+        <v-card-title>Publier l'annonce</v-card-title>
+        <v-card-subtitle v-if="publishModal.listing" class="pb-0">
+          {{ publishModal.listing.title }}
+        </v-card-subtitle>
         <v-card-text>
-          <div class="d-flex align-center mb-2">
-            <v-progress-circular
-              v-if="publishDialog.status === 'publishing'"
-              indeterminate
-              size="20"
-              width="2"
-              class="mr-3"
-            />
-            <v-icon
-              v-else-if="publishDialog.status === 'success'"
-              color="success"
-              class="mr-3"
-            >mdi-check-circle</v-icon>
-            <v-icon
-              v-else-if="publishDialog.status === 'error'"
-              color="error"
-              class="mr-3"
-            >mdi-alert-circle</v-icon>
-            <span>{{ publishDialog.stepLabel }}</span>
-          </div>
-          <p v-if="publishDialog.error" class="text-error text-caption mt-2">
-            {{ publishDialog.error }}
-          </p>
-          <p v-if="publishDialog.externalUrl" class="mt-2">
-            <a :href="publishDialog.externalUrl" target="_blank">
-              Voir l'annonce publiee
-            </a>
+          <template v-if="publishModal.accounts.length">
+            <v-list select-strategy="classic" v-model:selected="publishModal.selected">
+              <v-list-item
+                v-for="acc in publishModal.accounts"
+                :key="acc._id"
+                :value="acc._id"
+              >
+                <template #prepend="{ isActive }">
+                  <v-list-item-action start>
+                    <v-checkbox-btn :model-value="isActive" />
+                  </v-list-item-action>
+                  <img
+                    :src="platformImage(acc.platform)"
+                    :alt="platformLabel(acc.platform)"
+                    width="28"
+                    height="28"
+                    class="rounded mr-3"
+                  />
+                </template>
+                <v-list-item-title>{{ platformLabel(acc.platform) }}</v-list-item-title>
+                <v-list-item-subtitle>{{ acc.username }}</v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
+
+            <!-- Progress per account -->
+            <div v-if="Object.keys(publishSessions).length" class="mt-2">
+              <div
+                v-for="session in Object.values(publishSessions)"
+                :key="session.accountId"
+                class="d-flex align-center mb-2"
+              >
+                <img
+                  :src="platformImage(session.platform)"
+                  width="20"
+                  height="20"
+                  class="rounded mr-2"
+                />
+                <v-progress-circular
+                  v-if="session.status === 'publishing'"
+                  indeterminate
+                  size="16"
+                  width="2"
+                  class="mr-2"
+                />
+                <v-icon v-else-if="session.status === 'success'" color="success" size="16" class="mr-2">mdi-check-circle</v-icon>
+                <v-icon v-else-if="session.status === 'error'" color="error" size="16" class="mr-2">mdi-alert-circle</v-icon>
+                <span class="text-body-2">{{ session.stepLabel }}</span>
+              </div>
+            </div>
+          </template>
+          <p v-else class="text-medium-emphasis text-center pa-4">
+            Aucun compte connecte. <router-link to="/accounts">Ajouter un compte</router-link>
           </p>
         </v-card-text>
-        <v-card-actions v-if="publishDialog.status !== 'publishing'">
+        <v-card-actions>
           <v-spacer />
-          <v-btn @click="closePublishDialog">Fermer</v-btn>
+          <v-btn variant="text" @click="closePublishModal">Fermer</v-btn>
+          <v-btn
+            v-if="publishModal.accounts.length"
+            color="primary"
+            :disabled="!publishModal.selected.length || isPublishing"
+            :loading="isPublishing"
+            @click="onPublish"
+          >
+            Publier ({{ publishModal.selected.length }})
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -187,25 +205,41 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import apiClient from '@/api/client';
+import leboncoinIcon from '@/assets/leboncoin.png';
+import vintedIcon from '@/assets/vinted.png';
+
+const ALL_PLATFORMS = ['leboncoin', 'vinted'];
+const PER_PAGE = 20;
 
 const listings = ref<any[]>([]);
 const accounts = ref<any[]>([]);
-const selectedAccountId = ref<string | null>(null);
-const publishing = reactive<Record<string, boolean>>({});
+const total = ref(0);
+const page = ref(1);
 const snackbar = reactive({ show: false, text: '', color: 'success' });
 
-const publishDialog = reactive({
+const publishModal = reactive({
   show: false,
-  status: '' as string,
-  platform: '' as string,
-  stepLabel: '',
-  error: '',
-  externalUrl: '',
+  listing: null as any,
+  accounts: [] as any[],
+  selected: [] as string[],
 });
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+interface PublishSessionState {
+  accountId: string;
+  platform: string;
+  sessionId: string;
+  status: 'publishing' | 'success' | 'error';
+  stepLabel: string;
+}
+
+const publishSessions = reactive<Record<string, PublishSessionState>>({});
+const pollTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+const isPublishing = computed(() =>
+  Object.values(publishSessions).some((s) => s.status === 'publishing'),
+);
 
 const STEP_LABELS: Record<string, string> = {
   starting: 'Demarrage...',
@@ -217,28 +251,15 @@ const STEP_LABELS: Record<string, string> = {
   verifying: 'Verification de la publication...',
 };
 
-const accountOptions = computed(() =>
-  accounts.value.map((a) => ({
-    title: `${a.platform} — ${a.username}`,
-    value: a._id,
-  })),
-);
+const totalPages = computed(() => Math.ceil(total.value / PER_PAGE));
 
-const filteredListings = computed(() => {
-  if (!selectedAccountId.value) return listings.value;
-  return listings.value.filter((l) =>
-    l.publications.some(
-      (p: any) =>
-        p.accountId?._id === selectedAccountId.value ||
-        p.accountId === selectedAccountId.value,
-    ),
-  );
-});
+const PLATFORM_IMAGES: Record<string, string> = {
+  leboncoin: leboncoinIcon,
+  vinted: vintedIcon,
+};
 
-function platformIcon(platform: string) {
-  if (platform === 'leboncoin') return 'mdi-alpha-l-box';
-  if (platform === 'vinted') return 'mdi-alpha-v-box';
-  return 'mdi-web';
+function platformImage(platform: string): string {
+  return PLATFORM_IMAGES[platform] || '';
 }
 
 function platformLabel(platform: string) {
@@ -247,108 +268,130 @@ function platformLabel(platform: string) {
   return platform;
 }
 
-function statusColor(status: string) {
-  const colors: Record<string, string> = {
-    published: 'success',
-    draft: 'default',
-    pending: 'warning',
-    failed: 'error',
-    removed: 'grey',
-  };
-  return colors[status] || 'default';
+function getPublicationStatus(listing: any, platform: string): string | null {
+  if (!listing) return null;
+  const pub = listing.publications?.find((p: any) => p.platform === platform);
+  return pub?.status || null;
 }
 
-/** Platforms where this listing has NOT been published yet */
-function missingPlatforms(listing: any): string[] {
-  const published = new Set(
-    listing.publications
-      .filter((p: any) => p.status === 'published')
-      .map((p: any) => p.platform || p.accountId?.platform),
+function getPublicationUrl(listing: any, platform: string): string | null {
+  if (!listing) return null;
+  const pub = listing.publications?.find(
+    (p: any) => p.platform === platform && p.status === 'published',
   );
-  return ['leboncoin', 'vinted'].filter((p) => !published.has(p));
+  return pub?.externalUrl || null;
 }
 
-/** Accounts where this listing can still be published */
-function publishableAccounts(listing: any): any[] {
+function platformBadgeColor(listing: any, platform: string): string {
+  const status = getPublicationStatus(listing, platform);
+  if (status === 'published') return 'success';
+  if (status === 'failed') return 'error';
+  return 'grey';
+}
+
+function platformTooltip(listing: any, platform: string): string {
+  const status = getPublicationStatus(listing, platform);
+  const label = platformLabel(platform);
+  if (status === 'published') return `${label} — Publiee`;
+  if (status === 'failed') return `${label} — Echec`;
+  if (status === 'pending') return `${label} — En cours`;
+  return `${label} — Non publiee`;
+}
+
+function openPublishModal(listing: any) {
   const publishedPlatforms = new Set(
     listing.publications
-      .filter((p: any) => ['published', 'pending'].includes(p.status))
-      .map((p: any) => p.platform || p.accountId?.platform),
+      ?.filter((p: any) => ['published', 'pending'].includes(p.status))
+      .map((p: any) => p.platform) || [],
   );
-  return accounts.value.filter(
+  const available = accounts.value.filter(
     (a) => a.isConnected && !publishedPlatforms.has(a.platform),
   );
+  publishModal.listing = listing;
+  publishModal.accounts = available;
+  publishModal.selected = available.map((a) => a._id);
+  // Clear previous sessions
+  for (const key of Object.keys(publishSessions)) delete publishSessions[key];
+  publishModal.show = true;
 }
 
-function canPublish(listing: any): boolean {
-  return publishableAccounts(listing).length > 0 && !publishing[listing._id];
-}
+async function onPublish() {
+  const listingId = publishModal.listing._id;
+  const selectedAccounts = publishModal.accounts.filter((a) =>
+    publishModal.selected.includes(a._id),
+  );
 
-async function onPublish(listingId: string, accountId: string, platform: string) {
-  publishing[listingId] = true;
-  publishDialog.show = true;
-  publishDialog.status = 'publishing';
-  publishDialog.platform = platform;
-  publishDialog.stepLabel = STEP_LABELS['starting'];
-  publishDialog.error = '';
-  publishDialog.externalUrl = '';
+  for (const acc of selectedAccounts) {
+    try {
+      const session: PublishSessionState = {
+        accountId: acc._id,
+        platform: acc.platform,
+        sessionId: '',
+        status: 'publishing',
+        stepLabel: STEP_LABELS['starting'],
+      };
+      publishSessions[acc._id] = session;
 
-  try {
-    const { data } = await apiClient.post('/publish', { listingId, accountId });
-    const sessionId = data.sessionId;
+      const { data } = await apiClient.post('/publish', { listingId, accountId: acc._id });
+      session.sessionId = data.sessionId;
 
-    // Poll for status
-    pollTimer = setInterval(async () => {
-      try {
-        const { data: status } = await apiClient.get(`/publish/${sessionId}/status`);
-        publishDialog.stepLabel = STEP_LABELS[status.step] || status.step || '';
+      const timer = setInterval(async () => {
+        try {
+          const { data: status } = await apiClient.get(`/publish/${session.sessionId}/status`);
+          session.stepLabel = STEP_LABELS[status.step] || status.step || '';
 
-        if (status.status === 'success') {
-          publishDialog.status = 'success';
-          publishDialog.stepLabel = 'Annonce publiee avec succes !';
-          publishDialog.externalUrl = status.externalUrl || '';
-          stopPolling();
-          publishing[listingId] = false;
-          await fetchData();
-        } else if (status.status === 'error') {
-          publishDialog.status = 'error';
-          publishDialog.stepLabel = 'Echec de la publication';
-          publishDialog.error = status.error || 'Erreur inconnue';
-          stopPolling();
-          publishing[listingId] = false;
+          if (status.status === 'success') {
+            session.status = 'success';
+            session.stepLabel = 'Publiee !';
+            clearInterval(timer);
+            pollTimers.delete(acc._id);
+            await fetchData();
+          } else if (status.status === 'error') {
+            session.status = 'error';
+            session.stepLabel = status.error || 'Erreur';
+            clearInterval(timer);
+            pollTimers.delete(acc._id);
+          }
+        } catch {
+          // Polling error, continue
         }
-      } catch {
-        // Polling error, continue
-      }
-    }, 2000);
-  } catch (err: any) {
-    publishDialog.status = 'error';
-    publishDialog.stepLabel = 'Echec de la publication';
-    publishDialog.error = err.response?.data?.message || err.message;
-    publishing[listingId] = false;
+      }, 2000);
+      pollTimers.set(acc._id, timer);
+    } catch (err: any) {
+      publishSessions[acc._id] = {
+        accountId: acc._id,
+        platform: acc.platform,
+        sessionId: '',
+        status: 'error',
+        stepLabel: err.response?.data?.message || err.message,
+      };
+    }
   }
 }
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function stopAllPolling() {
+  for (const [key, timer] of pollTimers) {
+    clearInterval(timer);
+    pollTimers.delete(key);
   }
 }
 
-function closePublishDialog() {
-  publishDialog.show = false;
-  stopPolling();
+function closePublishModal() {
+  publishModal.show = false;
+  stopAllPolling();
 }
 
 async function fetchData() {
   const [listingsRes, accountsRes] = await Promise.all([
-    apiClient.get('/listings'),
+    apiClient.get('/listings', { params: { page: page.value, limit: PER_PAGE } }),
     apiClient.get('/accounts'),
   ]);
-  listings.value = listingsRes.data;
+  listings.value = listingsRes.data.items;
+  total.value = listingsRes.data.total;
   accounts.value = accountsRes.data;
 }
+
+watch(page, fetchData);
 
 async function removeListing(id: string) {
   await apiClient.delete(`/listings/${id}`);
@@ -356,5 +399,6 @@ async function removeListing(id: string) {
 }
 
 onMounted(fetchData);
-onUnmounted(stopPolling);
+onUnmounted(stopAllPolling);
 </script>
+

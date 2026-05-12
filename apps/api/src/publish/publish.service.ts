@@ -132,11 +132,12 @@ export class PublishService {
       if (listing.brand) listingData.brand = listing.brand;
       if (listing.size) listingData.size = listing.size;
       if (listing.color) listingData.color = listing.color;
+      if (listing.packageSize) listingData.packageSize = listing.packageSize;
       if (listing.location) listingData.location = listing.location;
 
       // Run the agent
       this.updateSession(sessionId, { step: 'filling_form' });
-      await this.agent.run({
+      const submitted = await this.agent.run({
         page,
         imagePaths,
         listingData,
@@ -146,6 +147,10 @@ export class PublishService {
         platform: account.platform,
         onStep: (step) => this.updateSession(sessionId, { step }),
       });
+
+      if (!submitted) {
+        throw new Error('Agent did not complete the form submission');
+      }
 
       // Extract result
       this.updateSession(sessionId, { step: 'verifying' });

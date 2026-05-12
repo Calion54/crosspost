@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ListingCondition } from '../enums/listing-condition.enum';
+import { PackageSize } from '../enums/package-size.enum';
 
 export const listingMediaSchema = z.object({
   key: z.string(),
@@ -17,6 +18,7 @@ export const createListingSchema = z.object({
   brand: z.string().optional(),
   size: z.string().optional(),
   color: z.string().optional(),
+  packageSize: z.nativeEnum(PackageSize),
   location: z.string().optional(),
   media: z.array(listingMediaSchema).default([]),
 });
@@ -26,6 +28,18 @@ export type CreateListingDto = z.infer<typeof createListingSchema>;
 export const updateListingSchema = createListingSchema.partial();
 
 export type UpdateListingDto = z.infer<typeof updateListingSchema>;
+
+export const listingQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export type ListingQueryDto = z.infer<typeof listingQuerySchema>;
+
+export interface PaginatedListings {
+  items: unknown[];
+  total: number;
+}
 
 export const autoFillSchema = z.object({
   title: z.string().min(3),
@@ -40,5 +54,6 @@ export interface AutoFillResult {
   brand?: string;
   size?: string;
   color?: string;
+  packageSize?: PackageSize;
   suggestedPrice?: number;
 }

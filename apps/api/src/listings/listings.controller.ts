@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { ListingsService } from './listings.service.js';
 import { AutoFillService } from './auto-fill.service.js';
@@ -13,6 +14,7 @@ import {
   CreateListingDto,
   UpdateListingDto,
   AutoFillDto,
+  ListingQueryDto,
 } from './dto/listing.dto.js';
 
 @Controller('listings')
@@ -33,8 +35,8 @@ export class ListingsController {
   }
 
   @Get()
-  findAll() {
-    return this.listingsService.findAll();
+  findAll(@Query() query: ListingQueryDto) {
+    return this.listingsService.findAll(query.page, query.limit);
   }
 
   @Get(':id')

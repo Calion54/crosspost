@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ListingCondition } from '@crosspost/shared';
+import { ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillDto, AutoFillResult } from '@crosspost/shared';
 import { LlmService } from '../common/llm/llm.service.js';
 
@@ -14,6 +14,7 @@ Format attendu :
   "brand": "marque si identifiable, sinon null",
   "size": "taille si applicable (vêtements, chaussures), sinon null",
   "color": "couleur principale si mentionnée, sinon null",
+  "packageSize": "S | M | L",
   "suggestedPrice": null
 }
 
@@ -21,6 +22,7 @@ Règles :
 - Pour "condition", déduis de la description (neuf, bon état, etc.). Si pas d'indication, mets "good".
 - Pour "brand", cherche dans le titre et la description.
 - Pour "size", ne mets une valeur que pour les vêtements, chaussures, accessoires vestimentaires.
+- Pour "packageSize", choisis la taille du colis pour expédier l'objet : S (petit, tient dans une enveloppe ou petite boîte), M (moyen, boîte à chaussures), L (grand, carton volumineux). Obligatoire.
 - Pour "suggestedPrice", mets null (on ne devine pas le prix).
 - Si tu ne peux pas déterminer un champ, mets null.`;
 
@@ -58,12 +60,18 @@ export class AutoFillService {
         ? (parsed.condition as ListingCondition)
         : undefined;
 
+      const packageSizeValues = Object.values(PackageSize) as string[];
+      const packageSize = packageSizeValues.includes(parsed.packageSize)
+        ? (parsed.packageSize as PackageSize)
+        : undefined;
+
       return {
         category: parsed.category || undefined,
         condition,
         brand: parsed.brand || undefined,
         size: parsed.size || undefined,
         color: parsed.color || undefined,
+        packageSize,
         suggestedPrice: parsed.suggestedPrice || undefined,
       };
     } catch (err: any) {

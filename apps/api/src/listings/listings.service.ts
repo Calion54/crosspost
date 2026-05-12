@@ -22,12 +22,19 @@ export class ListingsService {
     return this.listingModel.create(dto);
   }
 
-  async findAll() {
-    const listings = await this.listingModel
-      .find()
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  async findAll(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+
+    const [listings, total] = await Promise.all([
+      this.listingModel
+        .find()
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.listingModel.countDocuments().exec(),
+    ]);
 
     const listingIds = listings.map((l) => l._id);
     const publications = await this.publicationModel
@@ -36,17 +43,18 @@ export class ListingsService {
       .lean()
       .exec();
 
-    // Resolve all media keys to signed URLs in one batch
     const allKeys = listings.flatMap((l) => (l.media || []).map((m) => m.key));
     const urlMap = await this.mediaService.getSignedUrls(allKeys);
 
-    return listings.map((listing) => ({
+    const items = listings.map((listing) => ({
       ...listing,
       mediaUrls: (listing.media || []).map((m) => urlMap[m.key]).filter(Boolean),
       publications: publications.filter(
         (p) => p.listingId.toString() === listing._id.toString(),
       ),
     }));
+
+    return { items, total };
   }
 
   async findOne(id: string) {
