@@ -1,0 +1,16 @@
+{
+  "name": "crosspost",
+  "private": true,
+  "scripts": {
+    "dev:api": "pnpm --filter @crosspost/api dev",
+    "dev:web": "pnpm --filter @crosspost/web dev",
+    "dev": "pnpm run --parallel dev:api dev:web",
+    "build": "pnpm --filter @crosspost/shared build && pnpm run --parallel build:api build:web",
+    "build:api": "pnpm --filter @crosspost/api build",
+    "build:web": "pnpm --filter @crosspost/web build",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
