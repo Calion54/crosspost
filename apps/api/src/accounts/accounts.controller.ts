@@ -9,24 +9,25 @@ import {
 } from '@nestjs/common';
 import { AccountsService } from './accounts.service.js';
 import type { Platform } from '@crosspost/shared';
+import { CurrentUser, type AuthUser } from '../auth/current-user.decorator.js';
 
 @Controller('accounts')
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}
 
   @Get()
-  findAll() {
-    return this.accountsService.findAll();
+  findAll(@CurrentUser() user: AuthUser) {
+    return this.accountsService.findAll(user.userId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.accountsService.findOne(id);
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.findOne(user.userId, id);
   }
 
   @Post('connect')
-  connect(@Body('platform') platform: Platform) {
-    const sessionId = this.accountsService.startConnect(platform);
+  connect(@CurrentUser() user: AuthUser, @Body('platform') platform: Platform) {
+    const sessionId = this.accountsService.startConnect(user.userId, platform);
     return { sessionId };
   }
 
@@ -38,19 +39,19 @@ export class AccountsController {
   }
 
   @Post(':id/check-session')
-  checkSession(@Param('id') id: string) {
-    return this.accountsService.checkSession(id);
+  checkSession(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.checkSession(user.userId, id);
   }
 
   @Post(':id/reconnect')
-  async reconnect(@Param('id') id: string) {
-    const account = await this.accountsService.findOne(id);
-    const sessionId = this.accountsService.startConnect(account.platform);
+  async reconnect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const account = await this.accountsService.findOne(user.userId, id);
+    const sessionId = this.accountsService.startConnect(user.userId, account.platform);
     return { sessionId };
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.accountsService.remove(id);
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.remove(user.userId, id);
   }
 }

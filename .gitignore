@@ -8,4 +8,6 @@ dist
 .turbo
 coverage
 debug-snapshots
+publish-registry
+browser-profiles
 .idea

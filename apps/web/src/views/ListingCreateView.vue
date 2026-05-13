@@ -48,9 +48,11 @@
             />
           </v-col>
           <v-col cols="6">
-            <v-text-field
+            <v-select
               v-model="form.category"
+              :items="categories"
               label="Categorie"
+              clearable
               hide-details="auto"
             />
           </v-col>
@@ -70,15 +72,15 @@
             />
           </v-col>
           <v-col cols="6">
-            <v-text-field v-model="form.brand" label="Marque" hide-details="auto" />
+            <v-select
+              v-model="form.color"
+              :items="colors"
+              label="Couleur"
+              clearable
+              hide-details="auto"
+            />
           </v-col>
-          <v-col cols="4">
-            <v-text-field v-model="form.size" label="Taille" hide-details="auto" />
-          </v-col>
-          <v-col cols="4">
-            <v-text-field v-model="form.color" label="Couleur" hide-details="auto" />
-          </v-col>
-          <v-col cols="4">
+          <v-col cols="6">
             <v-select
               v-model="form.packageSize"
               :items="packageSizes"
@@ -123,12 +125,26 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ListingCondition, PackageSize } from '@crosspost/shared';
+import { ListingCategory, ListingColor, ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillResult, ListingMedia } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
 
 const router = useRouter();
+
+const categories = [
+  { title: 'Vetements & accessoires', value: ListingCategory.CLOTHING },
+  { title: 'Electronique', value: ListingCategory.ELECTRONICS },
+  { title: 'Maison & deco', value: ListingCategory.HOME },
+  { title: 'Sports & loisirs', value: ListingCategory.SPORTS },
+  { title: 'Jouets & jeux', value: ListingCategory.TOYS_GAMES },
+  { title: 'Livres & medias', value: ListingCategory.BOOKS_MEDIA },
+  { title: 'Beaute', value: ListingCategory.BEAUTY },
+  { title: 'Bebe & enfant', value: ListingCategory.BABY },
+  { title: 'Bricolage', value: ListingCategory.DIY },
+  { title: 'Collection', value: ListingCategory.COLLECTIBLES },
+  { title: 'Autre', value: ListingCategory.OTHER },
+];
 
 const conditions = [
   { title: 'Neuf avec etiquette', value: ListingCondition.NEW_WITH_TAGS },
@@ -136,6 +152,25 @@ const conditions = [
   { title: 'Tres bon etat', value: ListingCondition.VERY_GOOD },
   { title: 'Bon etat', value: ListingCondition.GOOD },
   { title: 'Etat correct', value: ListingCondition.FAIR },
+];
+
+const colors = [
+  { title: 'Noir', value: ListingColor.BLACK },
+  { title: 'Blanc', value: ListingColor.WHITE },
+  { title: 'Gris', value: ListingColor.GREY },
+  { title: 'Bleu', value: ListingColor.BLUE },
+  { title: 'Rouge', value: ListingColor.RED },
+  { title: 'Vert', value: ListingColor.GREEN },
+  { title: 'Jaune', value: ListingColor.YELLOW },
+  { title: 'Orange', value: ListingColor.ORANGE },
+  { title: 'Rose', value: ListingColor.PINK },
+  { title: 'Violet', value: ListingColor.PURPLE },
+  { title: 'Marron', value: ListingColor.BROWN },
+  { title: 'Beige', value: ListingColor.BEIGE },
+  { title: 'Dore', value: ListingColor.GOLD },
+  { title: 'Argente', value: ListingColor.SILVER },
+  { title: 'Multicolore', value: ListingColor.MULTICOLOR },
+  { title: 'Autre', value: ListingColor.OTHER },
 ];
 
 const packageSizes = [
@@ -155,11 +190,9 @@ const form = reactive({
   title: '',
   description: '',
   price: null as number | null,
-  category: '',
+  category: null as ListingCategory | null,
   condition: null as ListingCondition | null,
-  brand: '',
-  size: '',
-  color: '',
+  color: null as ListingColor | null,
   packageSize: (localStorage.getItem('listing.packageSize') as PackageSize | null) || null,
   location: localStorage.getItem('listing.location') || '',
   media: [] as ListingMedia[],
@@ -182,10 +215,9 @@ async function onAutoFill() {
       description: form.description || undefined,
     });
 
+    if (data.description) form.description = data.description;
     if (data.category && !form.category) form.category = data.category;
     if (data.condition && !form.condition) form.condition = data.condition;
-    if (data.brand && !form.brand) form.brand = data.brand;
-    if (data.size && !form.size) form.size = data.size;
     if (data.color && !form.color) form.color = data.color;
     if (data.packageSize && !form.packageSize) form.packageSize = data.packageSize;
     if (data.suggestedPrice && !form.price) form.price = data.suggestedPrice;
@@ -213,8 +245,6 @@ async function onSubmit() {
     };
     if (form.category) payload.category = form.category;
     if (form.condition) payload.condition = form.condition;
-    if (form.brand) payload.brand = form.brand;
-    if (form.size) payload.size = form.size;
     if (form.color) payload.color = form.color;
     payload.packageSize = form.packageSize;
     if (form.location) payload.location = form.location;

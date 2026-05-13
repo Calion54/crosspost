@@ -13,12 +13,13 @@ import {
 } from '../publications/schemas/publication.schema.js';
 import { BrowserService } from '../browser/browser.service.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
-import { LlmService } from '../common/llm/llm.service.js';
 import { ScrapeDebugService } from '../common/debug/scrape-debug.service.js';
 import { MediaService } from '../media/media.service.js';
-import { BrowserAgent } from './browser-agent.js';
-import type { PlatformPublisher } from './platforms/platform-publisher.js';
-import { LeboncoinPublisher } from './platforms/leboncoin.publisher.js';
+import { SelectorRegistryService } from './registry/selector-registry.service.js';
+import { waitForPageSettle } from './helpers/page.helpers.js';
+import type { StepResult } from './helpers/form.helpers.js';
+import type { PlatformPublisher, ListingData } from './platforms/platform-publisher.js';
+import { LeboncoinPublisher } from './platforms/leboncoin/leboncoin.publisher.js';
 
 export type PublishStatus = 'idle' | 'publishing' | 'success' | 'error';
 
@@ -31,15 +32,11 @@ export interface PublishSession {
   error?: string;
 }
 
-const PUBLISHERS: Record<string, PlatformPublisher> = {
-  leboncoin: new LeboncoinPublisher(),
-};
-
 @Injectable()
 export class PublishService {
   private readonly logger = new Logger(PublishService.name);
   private publishSessions = new Map<string, PublishSession>();
-  private agent: BrowserAgent;
+  private publishers: Record<string, PlatformPublisher>;
 
   constructor(
     @InjectModel(Account.name) private accountModel: Model<AccountDocument>,
@@ -48,11 +45,16 @@ export class PublishService {
     private publicationModel: Model<PublicationDocument>,
     private browserService: BrowserService,
     private encryptionService: EncryptionService,
-    private llmService: LlmService,
     private scrapeDebug: ScrapeDebugService,
     private mediaService: MediaService,
+    private registry: SelectorRegistryService,
   ) {
-    this.agent = new BrowserAgent(this.llmService);
+    const leboncoin = new LeboncoinPublisher(this.registry);
+    this.registry.registerDefaults('leboncoin', leboncoin.defaultRegistry);
+
+    this.publishers = {
+      leboncoin,
+    };
   }
 
   getPublishStatus(sessionId: string): PublishSession | null {
@@ -90,7 +92,7 @@ export class PublishService {
     if (!account) throw new NotFoundException('Account not found');
     if (!account.encryptedCookies) throw new Error('Account not connected');
 
-    const publisher = PUBLISHERS[account.platform];
+    const publisher = this.publishers[account.platform];
     if (!publisher) {
       throw new Error(`No publisher for platform: ${account.platform}`);
     }
@@ -98,58 +100,79 @@ export class PublishService {
     const listing = await this.listingModel.findById(listingId).exec();
     if (!listing) throw new NotFoundException('Listing not found');
 
+    // Load registry (with overrides if file exists)
+    await this.registry.load(account.platform);
+
     const cookies = JSON.parse(
       this.encryptionService.decrypt(account.encryptedCookies),
     );
 
     const imagePaths = await this.downloadImages(listing.media || []);
 
-    const context = await this.browserService.createContext(
-      cookies,
+    const context = await this.browserService.getPersistentContext(
+      accountId,
       account.userAgent,
     );
+    await this.browserService.injectCookies(accountId, cookies);
+
     const page = await context.newPage();
+    let snapshotCount = 0;
 
     try {
-      // Navigate to the form
+      // Navigate
       this.updateSession(sessionId, { step: 'navigating' });
-      await page.goto(publisher.getStartUrl(), {
+      await page.goto(publisher.startUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30_000,
       });
-      await page.waitForSelector('input, textarea, button, [role]', {
-        timeout: 15_000,
+      await waitForPageSettle(page);
+
+      // Initial snapshot
+      await this.scrapeDebug.captureSnapshot(page, {
+        platform: account.platform,
+        externalId: `publish_start_${listingId}`,
+        extractedData: { listingId },
+        saveFullHtml: true,
       });
 
-      // Build listing data for the agent
-      const listingData: Record<string, unknown> = {
+      // Build listing data
+      const listingData: ListingData = {
         title: listing.title,
         description: listing.description,
         price: listing.price,
+        category: listing.category,
+        condition: listing.condition,
+        color: listing.color,
+        packageSize: listing.packageSize,
+        location: listing.location,
       };
-      if (listing.category) listingData.category = listing.category;
-      if (listing.condition) listingData.condition = listing.condition;
-      if (listing.brand) listingData.brand = listing.brand;
-      if (listing.size) listingData.size = listing.size;
-      if (listing.color) listingData.color = listing.color;
-      if (listing.packageSize) listingData.packageSize = listing.packageSize;
-      if (listing.location) listingData.location = listing.location;
 
-      // Run the agent
-      this.updateSession(sessionId, { step: 'filling_form' });
-      const submitted = await this.agent.run({
-        page,
-        imagePaths,
-        listingData,
-        imageCount: imagePaths.length,
-        systemPrompt: publisher.getSystemPrompt(),
-        scrapeDebug: this.scrapeDebug,
-        platform: account.platform,
-        onStep: (step) => this.updateSession(sessionId, { step }),
-      });
+      // Run deterministic workflow
+      for (const step of publisher.steps) {
+        this.updateSession(sessionId, { step: step.name });
+        this.logger.debug(`[publish] Step: ${step.name}`);
 
-      if (!submitted) {
-        throw new Error('Agent did not complete the form submission');
+        try {
+          await step.run({ page, listing: listingData, imagePaths });
+        } catch (err: any) {
+          this.logger.warn(`[publish] Step "${step.name}" failed: ${err.message}`);
+          // Take snapshot on failure
+          await this.scrapeDebug.captureSnapshot(page, {
+            platform: account.platform,
+            externalId: `publish_fail_${step.name}_${listingId}`,
+            extractedData: { step: step.name, error: err.message },
+          });
+          throw err;
+        }
+
+        // Snapshot after each step (full HTML for first 3 steps to debug)
+        await this.scrapeDebug.captureSnapshot(page, {
+          platform: account.platform,
+          externalId: `publish_step_${step.name}_${listingId}`,
+          extractedData: { step: step.name },
+          saveFullHtml: snapshotCount < 15,
+        });
+        snapshotCount++;
       }
 
       // Extract result
@@ -186,7 +209,7 @@ export class PublishService {
       try {
         await this.scrapeDebug.captureSnapshot(page, {
           platform: account.platform,
-          externalId: `publish_fail_${listingId}`,
+          externalId: `publish_error_${listingId}`,
           extractedData: { error: error.message, listingId },
           saveFullHtml: true,
         });
@@ -195,8 +218,7 @@ export class PublishService {
       }
       throw error;
     } finally {
-      await context.close();
-      await this.browserService.closeBrowser();
+      await page.close();
       this.cleanupImages(imagePaths);
     }
   }

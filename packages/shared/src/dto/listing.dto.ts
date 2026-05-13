@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { ListingCategory } from '../enums/listing-category.enum';
+import { ListingColor } from '../enums/listing-color.enum';
 import { ListingCondition } from '../enums/listing-condition.enum';
 import { PackageSize } from '../enums/package-size.enum';
 
@@ -13,11 +15,9 @@ export const createListingSchema = z.object({
   title: z.string().min(3).max(100),
   description: z.string().min(10).max(4000),
   price: z.number().positive(),
-  category: z.string().optional(),
+  category: z.nativeEnum(ListingCategory).optional(),
   condition: z.nativeEnum(ListingCondition).optional(),
-  brand: z.string().optional(),
-  size: z.string().optional(),
-  color: z.string().optional(),
+  color: z.nativeEnum(ListingColor).optional(),
   packageSize: z.nativeEnum(PackageSize),
   location: z.string().optional(),
   media: z.array(listingMediaSchema).default([]),
@@ -49,11 +49,10 @@ export const autoFillSchema = z.object({
 export type AutoFillDto = z.infer<typeof autoFillSchema>;
 
 export interface AutoFillResult {
-  category?: string;
+  description?: string;
+  category?: ListingCategory;
   condition?: ListingCondition;
-  brand?: string;
-  size?: string;
-  color?: string;
+  color?: ListingColor;
   packageSize?: PackageSize;
   suggestedPrice?: number;
 }

@@ -23,7 +23,7 @@ Un `Listing` (universel) peut avoir plusieurs `Publication` (une par plateforme/
 
 Modele de donnees :
 ```
-User (email, passwordHash)
+User (email, password)
   |
   +-- Account (userId, platform, cookies chiffres, userAgent)
   |     |

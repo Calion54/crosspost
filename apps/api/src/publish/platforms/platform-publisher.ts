@@ -1,19 +1,37 @@
 import type { Page } from 'playwright';
+import type { RegistryEntry } from '../registry/selector-registry.service.js';
 
 export interface PublishResult {
   externalId: string;
   externalUrl: string;
 }
 
+export interface ListingData {
+  title: string;
+  description: string;
+  price: number;
+  category?: string;
+  condition?: string;
+  color?: string;
+  packageSize?: string;
+  location?: string;
+}
+
+export interface StepContext {
+  page: Page;
+  listing: ListingData;
+  imagePaths: string[];
+}
+
+export interface WorkflowStep {
+  name: string;
+  run(ctx: StepContext): Promise<void>;
+}
+
 export interface PlatformPublisher {
   readonly platform: string;
-
-  /** URL to navigate to before starting the agent */
-  getStartUrl(): string;
-
-  /** System prompt for the LLM agent — platform-specific instructions */
-  getSystemPrompt(): string;
-
-  /** Extract the publication result after the agent signals done */
+  readonly startUrl: string;
+  readonly defaultRegistry: Record<string, RegistryEntry>;
+  readonly steps: WorkflowStep[];
   extractResult(page: Page): Promise<PublishResult>;
 }

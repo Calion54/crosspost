@@ -18,22 +18,23 @@ export class ListingsService {
     private mediaService: MediaService,
   ) {}
 
-  create(dto: CreateListingDto) {
-    return this.listingModel.create(dto);
+  create(userId: string, dto: CreateListingDto) {
+    return this.listingModel.create({ ...dto, userId });
   }
 
-  async findAll(page = 1, limit = 20) {
+  async findAll(userId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
+    const filter = { userId };
 
     const [listings, total] = await Promise.all([
       this.listingModel
-        .find()
+        .find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean()
         .exec(),
-      this.listingModel.countDocuments().exec(),
+      this.listingModel.countDocuments(filter).exec(),
     ]);
 
     const listingIds = listings.map((l) => l._id);
@@ -57,8 +58,8 @@ export class ListingsService {
     return { items, total };
   }
 
-  async findOne(id: string) {
-    const listing = await this.listingModel.findById(id).lean().exec();
+  async findOne(userId: string, id: string) {
+    const listing = await this.listingModel.findOne({ _id: id, userId }).lean().exec();
     if (!listing) throw new NotFoundException('Listing not found');
 
     const keys = (listing.media || []).map((m) => m.key);
@@ -78,8 +79,8 @@ export class ListingsService {
     };
   }
 
-  async update(id: string, dto: UpdateListingDto) {
-    const existing = await this.listingModel.findById(id).lean().exec();
+  async update(userId: string, id: string, dto: UpdateListingDto) {
+    const existing = await this.listingModel.findOne({ _id: id, userId }).lean().exec();
     if (!existing) throw new NotFoundException('Listing not found');
 
     const listing = await this.listingModel
@@ -98,8 +99,8 @@ export class ListingsService {
     return listing!;
   }
 
-  async remove(id: string) {
-    const listing = await this.listingModel.findByIdAndDelete(id).exec();
+  async remove(userId: string, id: string) {
+    const listing = await this.listingModel.findOneAndDelete({ _id: id, userId }).exec();
     if (!listing) throw new NotFoundException('Listing not found');
     await this.publicationModel.deleteMany({ listingId: listing._id }).exec();
     // Clean up S3

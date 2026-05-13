@@ -1,32 +1,31 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import type { Platform } from '@crosspost/shared';
+import { Platform } from '@crosspost/shared';
 import { Account, type AccountDocument } from './schemas/account.schema.js';
 import { BrowserService } from '../browser/browser.service.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
 
-const PLATFORM_LOGIN_URLS: Record<string, string> = {
-  leboncoin: 'https://www.leboncoin.fr/compte',
-  vinted: 'https://www.vinted.fr/member/login',
-};
-
-const PLATFORM_AUTH_COOKIES: Record<string, string> = {
-  leboncoin: '__Secure-Login',
-  vinted: '_vinted_fr_session',
-};
-
-const PLATFORM_LOGGED_INDICATORS: Record<
-  string,
-  { url: string; cookieName: string }
+const PLATFORM_CONFIG: Record<
+  Platform,
+  {
+    loginUrl: string;
+    authCookie: string;
+    checkUrl: string;
+    logoutUrl: string;
+  }
 > = {
-  leboncoin: {
-    url: 'https://www.leboncoin.fr',
-    cookieName: 'datadome',
+  [Platform.LEBONCOIN]: {
+    loginUrl: 'https://www.leboncoin.fr/compte',
+    authCookie: '__Secure-Login',
+    checkUrl: 'https://www.leboncoin.fr',
+    logoutUrl: 'https://www.leboncoin.fr/compte/deconnexion',
   },
-  vinted: {
-    url: 'https://www.vinted.fr',
-    cookieName: '_vinted_fr_session',
+  [Platform.VINTED]: {
+    loginUrl: 'https://www.vinted.fr/member/login',
+    authCookie: '_vinted_fr_session',
+    checkUrl: 'https://www.vinted.fr',
+    logoutUrl: 'https://www.vinted.fr/member/logout',
   },
 };
 
@@ -50,48 +49,29 @@ export class AccountsService {
     private encryptionService: EncryptionService,
   ) {}
 
-  findAll() {
+  findAll(userId: string) {
     return this.accountModel
-      .find()
+      .find({ userId })
       .select('-encryptedCookies')
       .sort({ createdAt: -1 })
       .exec();
   }
 
-  async findOne(id: string) {
+  async findOne(userId: string, id: string) {
     const account = await this.accountModel
-      .findById(id)
+      .findOne({ _id: id, userId })
       .select('-encryptedCookies')
       .exec();
     if (!account) throw new NotFoundException('Account not found');
     return account;
   }
 
-  async findByPlatform(platform: Platform) {
-    return this.accountModel.findOne({ platform, isConnected: true }).exec();
-  }
-
-  async getCookies(id: string): Promise<Record<string, unknown>[]> {
-    const account = await this.accountModel.findById(id).exec();
-    if (!account?.encryptedCookies) return [];
-    try {
-      const decrypted = this.encryptionService.decrypt(account.encryptedCookies);
-      return JSON.parse(decrypted);
-    } catch (err: any) {
-      this.logger.warn(`Failed to decrypt cookies for account ${id}: ${err.message}`);
-      return [];
-    }
-  }
-
   getConnectStatus(sessionId: string): ConnectSession | null {
     return this.connectSessions.get(sessionId) ?? null;
   }
 
-  startConnect(platform: Platform): string {
-    const loginUrl = PLATFORM_LOGIN_URLS[platform];
-    if (!loginUrl) {
-      throw new NotFoundException(`Platform ${platform} not supported`);
-    }
+  startConnect(userId: string, platform: Platform): string {
+    const config = PLATFORM_CONFIG[platform];
 
     const sessionId = crypto.randomUUID();
     this.connectSessions.set(sessionId, {
@@ -100,20 +80,25 @@ export class AccountsService {
     });
 
     // Fire and forget — browser stays open until user logs in
-    this.runConnect(sessionId, platform, loginUrl).catch((error) => {
-      this.logger.error(`Connect session ${sessionId} failed: ${error.message}`);
-      this.connectSessions.set(sessionId, {
-        status: 'error',
-        platform,
-        error: error.message,
-      });
-    });
+    this.runConnect(sessionId, userId, platform, config.loginUrl).catch(
+      (error) => {
+        this.logger.error(
+          `Connect session ${sessionId} failed: ${error.message}`,
+        );
+        this.connectSessions.set(sessionId, {
+          status: 'error',
+          platform,
+          error: error.message,
+        });
+      },
+    );
 
     return sessionId;
   }
 
   private async runConnect(
     sessionId: string,
+    userId: string,
     platform: Platform,
     loginUrl: string,
   ) {
@@ -146,7 +131,7 @@ export class AccountsService {
       this.logger.log(`Waiting for manual login on ${platform}...`);
 
       // Poll for auth cookie presence (max 5 min)
-      const authCookieName = PLATFORM_AUTH_COOKIES[platform];
+      const authCookieName = PLATFORM_CONFIG[platform].authCookie;
       const deadline = Date.now() + 300_000;
       let authenticated = false;
 
@@ -154,7 +139,9 @@ export class AccountsService {
         await page.waitForTimeout(2000);
         const cookies = await context.cookies();
         const cookieNames = cookies.map((c) => c.name);
-        this.logger.debug(`[${platform}] Cookies found: ${cookieNames.join(', ')}`);
+        this.logger.debug(
+          `[${platform}] Cookies found: ${cookieNames.join(', ')}`,
+        );
         if (cookies.some((c) => c.name === authCookieName)) {
           authenticated = true;
           break;
@@ -179,8 +166,9 @@ export class AccountsService {
 
       const account = await this.accountModel
         .findOneAndUpdate(
-          { platform },
+          { userId, platform },
           {
+            userId,
             platform,
             username,
             encryptedCookies,
@@ -214,8 +202,11 @@ export class AccountsService {
     }
   }
 
-  async checkSession(id: string): Promise<{ isValid: boolean }> {
-    const account = await this.accountModel.findById(id).exec();
+  async checkSession(
+    userId: string,
+    id: string,
+  ): Promise<{ isValid: boolean }> {
+    const account = await this.accountModel.findOne({ _id: id, userId }).exec();
     if (!account?.encryptedCookies) {
       return { isValid: false };
     }
@@ -236,8 +227,7 @@ export class AccountsService {
       return { isValid: false };
     }
 
-    const indicator = PLATFORM_LOGGED_INDICATORS[account.platform];
-    if (!indicator) return { isValid: false };
+    const config = PLATFORM_CONFIG[account.platform];
 
     try {
       const context = await this.browserService.createContext(
@@ -246,7 +236,7 @@ export class AccountsService {
       );
       const page = await context.newPage();
 
-      await page.goto(indicator.url, {
+      await page.goto(config.checkUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 15_000,
       });
@@ -270,42 +260,33 @@ export class AccountsService {
     }
   }
 
-  async remove(id: string) {
-    const account = await this.accountModel.findById(id).exec();
+  async remove(userId: string, id: string) {
+    const account = await this.accountModel.findOne({ _id: id, userId }).exec();
     if (!account) throw new NotFoundException('Account not found');
 
     // Try to logout on the platform
-    if (account.encryptedCookies) {
-      try {
-        const cookies = JSON.parse(
-          this.encryptionService.decrypt(account.encryptedCookies),
-        );
-        const context = await this.browserService.createContext(
-          cookies,
-          account.userAgent,
-        );
-        const page = await context.newPage();
-
-        if (account.platform === 'leboncoin') {
-          await page.goto('https://www.leboncoin.fr/compte/deconnexion', {
-            waitUntil: 'domcontentloaded',
-            timeout: 10_000,
-          });
-        } else if (account.platform === 'vinted') {
-          await page.goto('https://www.vinted.fr/member/logout', {
-            waitUntil: 'domcontentloaded',
-            timeout: 10_000,
-          });
-        }
-
-        await context.close();
-        await this.browserService.closeBrowser();
-      } catch (error: any) {
-        this.logger.warn(`Could not logout from ${account.platform}: ${error.message}`);
-      }
+    try {
+      const cookies = JSON.parse(
+        this.encryptionService.decrypt(account.encryptedCookies),
+      );
+      const context = await this.browserService.createContext(
+        cookies,
+        account.userAgent,
+      );
+      const page = await context.newPage();
+      await page.goto(PLATFORM_CONFIG[account.platform].logoutUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10_000,
+      });
+      await context.close();
+      await this.browserService.closeBrowser();
+    } catch (error: any) {
+      this.logger.warn(
+        `Could not logout from ${account.platform}: ${error.message}`,
+      );
     }
 
-    await this.accountModel.findByIdAndDelete(id).exec();
+    await this.accountModel.findOneAndDelete({ _id: id, userId }).exec();
     return { message: 'Account removed' };
   }
 }

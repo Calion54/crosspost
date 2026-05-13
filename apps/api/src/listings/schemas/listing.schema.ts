@@ -1,6 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { ListingCondition, PackageSize } from '@crosspost/shared';
+import {
+  ListingCategory,
+  ListingColor,
+  ListingCondition,
+  PackageSize,
+} from '@crosspost/shared';
 
 export type ListingDocument = HydratedDocument<Listing>;
 
@@ -23,22 +28,16 @@ export class Listing {
   @Prop({ required: true })
   price: number;
 
-  @Prop()
-  category?: string;
+  @Prop({ type: String, enum: Object.values(ListingCategory) })
+  category?: ListingCategory;
 
-  @Prop({ type: String })
+  @Prop({ type: String, enum: Object.values(ListingCondition) })
   condition?: ListingCondition;
 
-  @Prop()
-  brand?: string;
+  @Prop({ type: String, enum: Object.values(ListingColor) })
+  color?: ListingColor;
 
-  @Prop()
-  size?: string;
-
-  @Prop()
-  color?: string;
-
-  @Prop({ type: String, required: true })
+  @Prop({ type: String, required: true, enum: Object.values(PackageSize) })
   packageSize: PackageSize;
 
   @Prop()

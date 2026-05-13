@@ -12,10 +12,10 @@ export class Publication {
   @Prop({ type: Types.ObjectId, ref: 'Account', required: true })
   accountId: Types.ObjectId;
 
-  @Prop({ required: true, type: String })
+  @Prop({ required: true, type: String, enum: Object.values(Platform) })
   platform: Platform;
 
-  @Prop({ required: true, type: String, default: PublicationStatus.DRAFT })
+  @Prop({ required: true, type: String, enum: Object.values(PublicationStatus), default: PublicationStatus.DRAFT })
   status: PublicationStatus;
 
   @Prop()

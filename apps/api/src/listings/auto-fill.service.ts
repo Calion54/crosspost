@@ -1,28 +1,46 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ListingCondition, PackageSize } from '@crosspost/shared';
+import { ListingCategory, ListingColor, ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillDto, AutoFillResult } from '@crosspost/shared';
 import { LlmService } from '../common/llm/llm.service.js';
 
 const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans les annonces de vente en ligne (Leboncoin, Vinted, etc.).
-À partir du titre et de la description d'une annonce, tu dois extraire et deviner les informations suivantes.
+À partir du titre et de la description d'une annonce, tu dois :
+1. Enrichir la description pour la rendre complète et structurée
+2. Extraire les métadonnées du produit
+
 Réponds UNIQUEMENT en JSON valide, sans markdown, sans explication.
 
 Format attendu :
 {
-  "category": "catégorie générale du produit (ex: Vêtements, Électronique, Jeux & Jouets, Maison, Sport...)",
+  "description": "Description enrichie et structurée (voir règles ci-dessous)",
+  "category": "clothing | electronics | home | sports | toys_games | books_media | beauty | baby | diy | collectibles | other",
   "condition": "new_with_tags | new_without_tags | very_good | good | fair",
-  "brand": "marque si identifiable, sinon null",
-  "size": "taille si applicable (vêtements, chaussures), sinon null",
-  "color": "couleur principale si mentionnée, sinon null",
+  "color": "black | white | grey | blue | red | green | yellow | orange | pink | purple | brown | beige | gold | silver | multicolor | other",
   "packageSize": "S | M | L",
   "suggestedPrice": null
 }
 
-Règles :
+Règles pour la description enrichie :
+- Garde le texte original de l'utilisateur comme base
+- Ajoute un bloc structuré à la fin avec les caractéristiques détectées, séparé par une ligne vide
+- Format du bloc : "Marque : X", "Taille : X", "Matière : X", etc. — une ligne par caractéristique
+- N'ajoute que les caractéristiques que tu peux déduire du titre et de la description
+- Ce bloc servira ensuite à remplir automatiquement les champs spécifiques des plateformes (marque, taille, modèle, etc.)
+- La description doit rester naturelle et agréable à lire
+
+Exemple :
+Titre : "Veste en cuir Schott NYC taille L"
+Description utilisateur : "Portée quelques fois, très bon état"
+→ description enrichie :
+"Portée quelques fois, très bon état.
+
+Marque : Schott NYC
+Taille : L
+Matière : Cuir"
+
+Règles pour les métadonnées :
 - Pour "condition", déduis de la description (neuf, bon état, etc.). Si pas d'indication, mets "good".
-- Pour "brand", cherche dans le titre et la description.
-- Pour "size", ne mets une valeur que pour les vêtements, chaussures, accessoires vestimentaires.
-- Pour "packageSize", choisis la taille du colis pour expédier l'objet : S (petit, tient dans une enveloppe ou petite boîte), M (moyen, boîte à chaussures), L (grand, carton volumineux). Obligatoire.
+- Pour "packageSize" : S (enveloppe, petite boîte), M (boîte à chaussures), L (carton volumineux). Obligatoire.
 - Pour "suggestedPrice", mets null (on ne devine pas le prix).
 - Si tu ne peux pas déterminer un champ, mets null.`;
 
@@ -43,7 +61,7 @@ export class AutoFillService {
     const response = await this.llm.createMessage({
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
-      maxTokens: 256,
+      maxTokens: 512,
     });
 
     const text =
@@ -53,11 +71,26 @@ export class AutoFillService {
 
     try {
       const cleaned = text.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        this.logger.error(`No JSON found in AutoFill response: ${text}`);
+        return {};
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      const categoryValues = Object.values(ListingCategory) as string[];
+      const category = categoryValues.includes(parsed.category)
+        ? (parsed.category as ListingCategory)
+        : undefined;
 
       const conditionValues = Object.values(ListingCondition) as string[];
       const condition = conditionValues.includes(parsed.condition)
         ? (parsed.condition as ListingCondition)
+        : undefined;
+
+      const colorValues = Object.values(ListingColor) as string[];
+      const color = colorValues.includes(parsed.color)
+        ? (parsed.color as ListingColor)
         : undefined;
 
       const packageSizeValues = Object.values(PackageSize) as string[];
@@ -66,11 +99,10 @@ export class AutoFillService {
         : undefined;
 
       return {
-        category: parsed.category || undefined,
+        description: parsed.description || undefined,
+        category,
         condition,
-        brand: parsed.brand || undefined,
-        size: parsed.size || undefined,
-        color: parsed.color || undefined,
+        color,
         packageSize,
         suggestedPrice: parsed.suggestedPrice || undefined,
       };

@@ -47,9 +47,11 @@
             />
           </v-col>
           <v-col cols="6">
-            <v-text-field
+            <v-select
               v-model="form.category"
+              :items="categories"
               label="Categorie"
+              clearable
               hide-details="auto"
             />
           </v-col>
@@ -69,15 +71,15 @@
             />
           </v-col>
           <v-col cols="6">
-            <v-text-field v-model="form.brand" label="Marque" hide-details="auto" />
+            <v-select
+              v-model="form.color"
+              :items="colors"
+              label="Couleur"
+              clearable
+              hide-details="auto"
+            />
           </v-col>
-          <v-col cols="4">
-            <v-text-field v-model="form.size" label="Taille" hide-details="auto" />
-          </v-col>
-          <v-col cols="4">
-            <v-text-field v-model="form.color" label="Couleur" hide-details="auto" />
-          </v-col>
-          <v-col cols="4">
+          <v-col cols="6">
             <v-select
               v-model="form.packageSize"
               :items="packageSizes"
@@ -121,7 +123,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ListingCondition, PackageSize } from '@crosspost/shared';
+import { ListingCategory, ListingColor, ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillResult, ListingMedia } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
@@ -130,12 +132,45 @@ const route = useRoute();
 const router = useRouter();
 const id = route.params.id as string;
 
+const categories = [
+  { title: 'Vetements & accessoires', value: ListingCategory.CLOTHING },
+  { title: 'Electronique', value: ListingCategory.ELECTRONICS },
+  { title: 'Maison & deco', value: ListingCategory.HOME },
+  { title: 'Sports & loisirs', value: ListingCategory.SPORTS },
+  { title: 'Jouets & jeux', value: ListingCategory.TOYS_GAMES },
+  { title: 'Livres & medias', value: ListingCategory.BOOKS_MEDIA },
+  { title: 'Beaute', value: ListingCategory.BEAUTY },
+  { title: 'Bebe & enfant', value: ListingCategory.BABY },
+  { title: 'Bricolage', value: ListingCategory.DIY },
+  { title: 'Collection', value: ListingCategory.COLLECTIBLES },
+  { title: 'Autre', value: ListingCategory.OTHER },
+];
+
 const conditions = [
   { title: 'Neuf avec etiquette', value: ListingCondition.NEW_WITH_TAGS },
   { title: 'Neuf sans etiquette', value: ListingCondition.NEW_WITHOUT_TAGS },
   { title: 'Tres bon etat', value: ListingCondition.VERY_GOOD },
   { title: 'Bon etat', value: ListingCondition.GOOD },
   { title: 'Etat correct', value: ListingCondition.FAIR },
+];
+
+const colors = [
+  { title: 'Noir', value: ListingColor.BLACK },
+  { title: 'Blanc', value: ListingColor.WHITE },
+  { title: 'Gris', value: ListingColor.GREY },
+  { title: 'Bleu', value: ListingColor.BLUE },
+  { title: 'Rouge', value: ListingColor.RED },
+  { title: 'Vert', value: ListingColor.GREEN },
+  { title: 'Jaune', value: ListingColor.YELLOW },
+  { title: 'Orange', value: ListingColor.ORANGE },
+  { title: 'Rose', value: ListingColor.PINK },
+  { title: 'Violet', value: ListingColor.PURPLE },
+  { title: 'Marron', value: ListingColor.BROWN },
+  { title: 'Beige', value: ListingColor.BEIGE },
+  { title: 'Dore', value: ListingColor.GOLD },
+  { title: 'Argente', value: ListingColor.SILVER },
+  { title: 'Multicolore', value: ListingColor.MULTICOLOR },
+  { title: 'Autre', value: ListingColor.OTHER },
 ];
 
 const packageSizes = [
@@ -148,11 +183,9 @@ const form = reactive({
   title: '',
   description: '',
   price: null as number | null,
-  category: '',
+  category: null as ListingCategory | null,
   condition: null as ListingCondition | null,
-  brand: '',
-  size: '',
-  color: '',
+  color: null as ListingColor | null,
   packageSize: null as PackageSize | null,
   location: '',
   media: [] as ListingMedia[],
@@ -170,11 +203,9 @@ onMounted(async () => {
     form.title = data.title || '';
     form.description = data.description || '';
     form.price = data.price || null;
-    form.category = data.category || '';
+    form.category = data.category || null;
     form.condition = data.condition || null;
-    form.brand = data.brand || '';
-    form.size = data.size || '';
-    form.color = data.color || '';
+    form.color = data.color || null;
     form.packageSize = data.packageSize || null;
     form.location = data.location || '';
     form.media = data.media || [];
@@ -196,10 +227,9 @@ async function onAutoFill() {
       description: form.description || undefined,
     });
 
+    if (data.description) form.description = data.description;
     if (data.category) form.category = data.category;
     if (data.condition) form.condition = data.condition;
-    if (data.brand) form.brand = data.brand;
-    if (data.size) form.size = data.size;
     if (data.color) form.color = data.color;
     if (data.packageSize && !form.packageSize) form.packageSize = data.packageSize;
 
@@ -226,8 +256,6 @@ async function onSubmit() {
     };
     if (form.category) payload.category = form.category;
     if (form.condition) payload.condition = form.condition;
-    if (form.brand) payload.brand = form.brand;
-    if (form.size) payload.size = form.size;
     if (form.color) payload.color = form.color;
     if (form.packageSize) payload.packageSize = form.packageSize;
     if (form.location) payload.location = form.location;

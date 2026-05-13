@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PublishController } from './publish.controller.js';
 import { PublishService } from './publish.service.js';
+import { SelectorRegistryService } from './registry/selector-registry.service.js';
 import { Account, AccountSchema } from '../accounts/schemas/account.schema.js';
 import { Listing, ListingSchema } from '../listings/schemas/listing.schema.js';
 import {
@@ -20,6 +21,6 @@ import { MediaModule } from '../media/media.module.js';
     MediaModule,
   ],
   controllers: [PublishController],
-  providers: [PublishService],
+  providers: [PublishService, SelectorRegistryService],
 })
 export class PublishModule {}

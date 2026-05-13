@@ -1,15 +1,46 @@
 import { reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ListingCondition, PackageSize } from '@crosspost/shared';
+import { ListingCategory, ListingColor, ListingCondition, PackageSize } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
 const router = useRouter();
+const categories = [
+    { title: 'Vetements & accessoires', value: ListingCategory.CLOTHING },
+    { title: 'Electronique', value: ListingCategory.ELECTRONICS },
+    { title: 'Maison & deco', value: ListingCategory.HOME },
+    { title: 'Sports & loisirs', value: ListingCategory.SPORTS },
+    { title: 'Jouets & jeux', value: ListingCategory.TOYS_GAMES },
+    { title: 'Livres & medias', value: ListingCategory.BOOKS_MEDIA },
+    { title: 'Beaute', value: ListingCategory.BEAUTY },
+    { title: 'Bebe & enfant', value: ListingCategory.BABY },
+    { title: 'Bricolage', value: ListingCategory.DIY },
+    { title: 'Collection', value: ListingCategory.COLLECTIBLES },
+    { title: 'Autre', value: ListingCategory.OTHER },
+];
 const conditions = [
     { title: 'Neuf avec etiquette', value: ListingCondition.NEW_WITH_TAGS },
     { title: 'Neuf sans etiquette', value: ListingCondition.NEW_WITHOUT_TAGS },
     { title: 'Tres bon etat', value: ListingCondition.VERY_GOOD },
     { title: 'Bon etat', value: ListingCondition.GOOD },
     { title: 'Etat correct', value: ListingCondition.FAIR },
+];
+const colors = [
+    { title: 'Noir', value: ListingColor.BLACK },
+    { title: 'Blanc', value: ListingColor.WHITE },
+    { title: 'Gris', value: ListingColor.GREY },
+    { title: 'Bleu', value: ListingColor.BLUE },
+    { title: 'Rouge', value: ListingColor.RED },
+    { title: 'Vert', value: ListingColor.GREEN },
+    { title: 'Jaune', value: ListingColor.YELLOW },
+    { title: 'Orange', value: ListingColor.ORANGE },
+    { title: 'Rose', value: ListingColor.PINK },
+    { title: 'Violet', value: ListingColor.PURPLE },
+    { title: 'Marron', value: ListingColor.BROWN },
+    { title: 'Beige', value: ListingColor.BEIGE },
+    { title: 'Dore', value: ListingColor.GOLD },
+    { title: 'Argente', value: ListingColor.SILVER },
+    { title: 'Multicolore', value: ListingColor.MULTICOLOR },
+    { title: 'Autre', value: ListingColor.OTHER },
 ];
 const packageSizes = [
     { title: 'S — Petit (enveloppe, petite boite)', value: PackageSize.S },
@@ -25,11 +56,9 @@ const form = reactive({
     title: '',
     description: '',
     price: null,
-    category: '',
+    category: null,
     condition: null,
-    brand: '',
-    size: '',
-    color: '',
+    color: null,
     packageSize: localStorage.getItem('listing.packageSize') || null,
     location: localStorage.getItem('listing.location') || '',
     media: [],
@@ -46,14 +75,12 @@ async function onAutoFill() {
             title: form.title,
             description: form.description || undefined,
         });
+        if (data.description)
+            form.description = data.description;
         if (data.category && !form.category)
             form.category = data.category;
         if (data.condition && !form.condition)
             form.condition = data.condition;
-        if (data.brand && !form.brand)
-            form.brand = data.brand;
-        if (data.size && !form.size)
-            form.size = data.size;
         if (data.color && !form.color)
             form.color = data.color;
         if (data.packageSize && !form.packageSize)
@@ -86,10 +113,6 @@ async function onSubmit() {
             payload.category = form.category;
         if (form.condition)
             payload.condition = form.condition;
-        if (form.brand)
-            payload.brand = form.brand;
-        if (form.size)
-            payload.size = form.size;
         if (form.color)
             payload.color = form.color;
         payload.packageSize = form.packageSize;
@@ -298,17 +321,21 @@ const __VLS_54 = __VLS_53({
     cols: "6",
 }, ...__VLS_functionalComponentArgsRest(__VLS_53));
 __VLS_55.slots.default;
-const __VLS_56 = {}.VTextField;
-/** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
+const __VLS_56 = {}.VSelect;
+/** @type {[typeof __VLS_components.VSelect, typeof __VLS_components.vSelect, ]} */ ;
 // @ts-ignore
 const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
     modelValue: (__VLS_ctx.form.category),
+    items: (__VLS_ctx.categories),
     label: "Categorie",
+    clearable: true,
     hideDetails: "auto",
 }));
 const __VLS_58 = __VLS_57({
     modelValue: (__VLS_ctx.form.category),
+    items: (__VLS_ctx.categories),
     label: "Categorie",
+    clearable: true,
     hideDetails: "auto",
 }, ...__VLS_functionalComponentArgsRest(__VLS_57));
 var __VLS_55;
@@ -371,17 +398,21 @@ const __VLS_78 = __VLS_77({
     cols: "6",
 }, ...__VLS_functionalComponentArgsRest(__VLS_77));
 __VLS_79.slots.default;
-const __VLS_80 = {}.VTextField;
-/** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
+const __VLS_80 = {}.VSelect;
+/** @type {[typeof __VLS_components.VSelect, typeof __VLS_components.vSelect, ]} */ ;
 // @ts-ignore
 const __VLS_81 = __VLS_asFunctionalComponent(__VLS_80, new __VLS_80({
-    modelValue: (__VLS_ctx.form.brand),
-    label: "Marque",
+    modelValue: (__VLS_ctx.form.color),
+    items: (__VLS_ctx.colors),
+    label: "Couleur",
+    clearable: true,
     hideDetails: "auto",
 }));
 const __VLS_82 = __VLS_81({
-    modelValue: (__VLS_ctx.form.brand),
-    label: "Marque",
+    modelValue: (__VLS_ctx.form.color),
+    items: (__VLS_ctx.colors),
+    label: "Couleur",
+    clearable: true,
     hideDetails: "auto",
 }, ...__VLS_functionalComponentArgsRest(__VLS_81));
 var __VLS_79;
@@ -389,123 +420,75 @@ const __VLS_84 = {}.VCol;
 /** @type {[typeof __VLS_components.VCol, typeof __VLS_components.vCol, typeof __VLS_components.VCol, typeof __VLS_components.vCol, ]} */ ;
 // @ts-ignore
 const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
-    cols: "4",
+    cols: "6",
 }));
 const __VLS_86 = __VLS_85({
-    cols: "4",
+    cols: "6",
 }, ...__VLS_functionalComponentArgsRest(__VLS_85));
 __VLS_87.slots.default;
-const __VLS_88 = {}.VTextField;
-/** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
+const __VLS_88 = {}.VSelect;
+/** @type {[typeof __VLS_components.VSelect, typeof __VLS_components.vSelect, ]} */ ;
 // @ts-ignore
 const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
-    modelValue: (__VLS_ctx.form.size),
-    label: "Taille",
+    modelValue: (__VLS_ctx.form.packageSize),
+    items: (__VLS_ctx.packageSizes),
+    label: "Taille du colis",
+    rules: ([__VLS_ctx.rules.required]),
     hideDetails: "auto",
 }));
 const __VLS_90 = __VLS_89({
-    modelValue: (__VLS_ctx.form.size),
-    label: "Taille",
+    modelValue: (__VLS_ctx.form.packageSize),
+    items: (__VLS_ctx.packageSizes),
+    label: "Taille du colis",
+    rules: ([__VLS_ctx.rules.required]),
     hideDetails: "auto",
 }, ...__VLS_functionalComponentArgsRest(__VLS_89));
 var __VLS_87;
-const __VLS_92 = {}.VCol;
-/** @type {[typeof __VLS_components.VCol, typeof __VLS_components.vCol, typeof __VLS_components.VCol, typeof __VLS_components.vCol, ]} */ ;
+var __VLS_67;
+var __VLS_63;
+const __VLS_92 = {}.VCard;
+/** @type {[typeof __VLS_components.VCard, typeof __VLS_components.vCard, typeof __VLS_components.VCard, typeof __VLS_components.vCard, ]} */ ;
 // @ts-ignore
 const __VLS_93 = __VLS_asFunctionalComponent(__VLS_92, new __VLS_92({
-    cols: "4",
+    ...{ class: "pa-4 mb-4" },
 }));
 const __VLS_94 = __VLS_93({
-    cols: "4",
+    ...{ class: "pa-4 mb-4" },
 }, ...__VLS_functionalComponentArgsRest(__VLS_93));
 __VLS_95.slots.default;
+__VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+    ...{ class: "text-subtitle-2 text-medium-emphasis mb-3" },
+});
 const __VLS_96 = {}.VTextField;
 /** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
 // @ts-ignore
 const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
-    modelValue: (__VLS_ctx.form.color),
-    label: "Couleur",
-    hideDetails: "auto",
+    modelValue: (__VLS_ctx.form.location),
+    label: "Adresse",
+    placeholder: "ex: Paris (75011)",
+    prependInnerIcon: "mdi-map-marker",
+    ...{ class: "mb-2" },
 }));
 const __VLS_98 = __VLS_97({
-    modelValue: (__VLS_ctx.form.color),
-    label: "Couleur",
-    hideDetails: "auto",
+    modelValue: (__VLS_ctx.form.location),
+    label: "Adresse",
+    placeholder: "ex: Paris (75011)",
+    prependInnerIcon: "mdi-map-marker",
+    ...{ class: "mb-2" },
 }, ...__VLS_functionalComponentArgsRest(__VLS_97));
-var __VLS_95;
-const __VLS_100 = {}.VCol;
-/** @type {[typeof __VLS_components.VCol, typeof __VLS_components.vCol, typeof __VLS_components.VCol, typeof __VLS_components.vCol, ]} */ ;
-// @ts-ignore
-const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
-    cols: "4",
-}));
-const __VLS_102 = __VLS_101({
-    cols: "4",
-}, ...__VLS_functionalComponentArgsRest(__VLS_101));
-__VLS_103.slots.default;
-const __VLS_104 = {}.VSelect;
-/** @type {[typeof __VLS_components.VSelect, typeof __VLS_components.vSelect, ]} */ ;
-// @ts-ignore
-const __VLS_105 = __VLS_asFunctionalComponent(__VLS_104, new __VLS_104({
-    modelValue: (__VLS_ctx.form.packageSize),
-    items: (__VLS_ctx.packageSizes),
-    label: "Taille du colis",
-    rules: ([__VLS_ctx.rules.required]),
-    hideDetails: "auto",
-}));
-const __VLS_106 = __VLS_105({
-    modelValue: (__VLS_ctx.form.packageSize),
-    items: (__VLS_ctx.packageSizes),
-    label: "Taille du colis",
-    rules: ([__VLS_ctx.rules.required]),
-    hideDetails: "auto",
-}, ...__VLS_functionalComponentArgsRest(__VLS_105));
-var __VLS_103;
-var __VLS_67;
-var __VLS_63;
-const __VLS_108 = {}.VCard;
-/** @type {[typeof __VLS_components.VCard, typeof __VLS_components.vCard, typeof __VLS_components.VCard, typeof __VLS_components.vCard, ]} */ ;
-// @ts-ignore
-const __VLS_109 = __VLS_asFunctionalComponent(__VLS_108, new __VLS_108({
-    ...{ class: "pa-4 mb-4" },
-}));
-const __VLS_110 = __VLS_109({
-    ...{ class: "pa-4 mb-4" },
-}, ...__VLS_functionalComponentArgsRest(__VLS_109));
-__VLS_111.slots.default;
-__VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-    ...{ class: "text-subtitle-2 text-medium-emphasis mb-3" },
-});
-const __VLS_112 = {}.VTextField;
-/** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
-// @ts-ignore
-const __VLS_113 = __VLS_asFunctionalComponent(__VLS_112, new __VLS_112({
-    modelValue: (__VLS_ctx.form.location),
-    label: "Adresse",
-    placeholder: "ex: Paris (75011)",
-    prependInnerIcon: "mdi-map-marker",
-    ...{ class: "mb-2" },
-}));
-const __VLS_114 = __VLS_113({
-    modelValue: (__VLS_ctx.form.location),
-    label: "Adresse",
-    placeholder: "ex: Paris (75011)",
-    prependInnerIcon: "mdi-map-marker",
-    ...{ class: "mb-2" },
-}, ...__VLS_functionalComponentArgsRest(__VLS_113));
 /** @type {[typeof MediaUpload, ]} */ ;
 // @ts-ignore
-const __VLS_116 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
+const __VLS_100 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
     modelValue: (__VLS_ctx.form.media),
 }));
-const __VLS_117 = __VLS_116({
+const __VLS_101 = __VLS_100({
     modelValue: (__VLS_ctx.form.media),
-}, ...__VLS_functionalComponentArgsRest(__VLS_116));
-var __VLS_111;
-const __VLS_119 = {}.VBtn;
+}, ...__VLS_functionalComponentArgsRest(__VLS_100));
+var __VLS_95;
+const __VLS_103 = {}.VBtn;
 /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
 // @ts-ignore
-const __VLS_120 = __VLS_asFunctionalComponent(__VLS_119, new __VLS_119({
+const __VLS_104 = __VLS_asFunctionalComponent(__VLS_103, new __VLS_103({
     type: "submit",
     color: "primary",
     size: "large",
@@ -513,33 +496,33 @@ const __VLS_120 = __VLS_asFunctionalComponent(__VLS_119, new __VLS_119({
     loading: (__VLS_ctx.submitting),
     disabled: (!__VLS_ctx.canSubmit),
 }));
-const __VLS_121 = __VLS_120({
+const __VLS_105 = __VLS_104({
     type: "submit",
     color: "primary",
     size: "large",
     block: true,
     loading: (__VLS_ctx.submitting),
     disabled: (!__VLS_ctx.canSubmit),
-}, ...__VLS_functionalComponentArgsRest(__VLS_120));
-__VLS_122.slots.default;
-var __VLS_122;
+}, ...__VLS_functionalComponentArgsRest(__VLS_104));
+__VLS_106.slots.default;
+var __VLS_106;
 var __VLS_23;
-const __VLS_123 = {}.VSnackbar;
+const __VLS_107 = {}.VSnackbar;
 /** @type {[typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, ]} */ ;
 // @ts-ignore
-const __VLS_124 = __VLS_asFunctionalComponent(__VLS_123, new __VLS_123({
+const __VLS_108 = __VLS_asFunctionalComponent(__VLS_107, new __VLS_107({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
 }));
-const __VLS_125 = __VLS_124({
+const __VLS_109 = __VLS_108({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
-}, ...__VLS_functionalComponentArgsRest(__VLS_124));
-__VLS_126.slots.default;
+}, ...__VLS_functionalComponentArgsRest(__VLS_108));
+__VLS_110.slots.default;
 (__VLS_ctx.snackbar.text);
-var __VLS_126;
+var __VLS_110;
 /** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['align-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
@@ -566,7 +549,9 @@ const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
             MediaUpload: MediaUpload,
+            categories: categories,
             conditions: conditions,
+            colors: colors,
             packageSizes: packageSizes,
             rules: rules,
             form: form,

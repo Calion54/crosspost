@@ -16,6 +16,7 @@ import {
   AutoFillDto,
   ListingQueryDto,
 } from './dto/listing.dto.js';
+import { CurrentUser, type AuthUser } from '../auth/current-user.decorator.js';
 
 @Controller('listings')
 export class ListingsController {
@@ -30,27 +31,27 @@ export class ListingsController {
   }
 
   @Post()
-  create(@Body() dto: CreateListingDto) {
-    return this.listingsService.create(dto);
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateListingDto) {
+    return this.listingsService.create(user.userId, dto);
   }
 
   @Get()
-  findAll(@Query() query: ListingQueryDto) {
-    return this.listingsService.findAll(query.page, query.limit);
+  findAll(@CurrentUser() user: AuthUser, @Query() query: ListingQueryDto) {
+    return this.listingsService.findAll(user.userId, query.page, query.limit);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.listingsService.findOne(id);
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.listingsService.findOne(user.userId, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateListingDto) {
-    return this.listingsService.update(id, dto);
+  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateListingDto) {
+    return this.listingsService.update(user.userId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.listingsService.remove(id);
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.listingsService.remove(user.userId, id);
   }
 }

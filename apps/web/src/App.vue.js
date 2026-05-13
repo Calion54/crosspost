@@ -74,63 +74,50 @@ const __VLS_25 = {}.VListItem;
 /** @type {[typeof __VLS_components.VListItem, typeof __VLS_components.vListItem, ]} */ ;
 // @ts-ignore
 const __VLS_26 = __VLS_asFunctionalComponent(__VLS_25, new __VLS_25({
-    prependIcon: "mdi-publish",
-    title: "Publications",
-    to: "/publications",
+    prependIcon: "mdi-account-multiple",
+    title: "Comptes",
+    to: "/accounts",
 }));
 const __VLS_27 = __VLS_26({
-    prependIcon: "mdi-publish",
-    title: "Publications",
-    to: "/publications",
+    prependIcon: "mdi-account-multiple",
+    title: "Comptes",
+    to: "/accounts",
 }, ...__VLS_functionalComponentArgsRest(__VLS_26));
-const __VLS_29 = {}.VListItem;
-/** @type {[typeof __VLS_components.VListItem, typeof __VLS_components.vListItem, ]} */ ;
-// @ts-ignore
-const __VLS_30 = __VLS_asFunctionalComponent(__VLS_29, new __VLS_29({
-    prependIcon: "mdi-account-multiple",
-    title: "Comptes",
-    to: "/accounts",
-}));
-const __VLS_31 = __VLS_30({
-    prependIcon: "mdi-account-multiple",
-    title: "Comptes",
-    to: "/accounts",
-}, ...__VLS_functionalComponentArgsRest(__VLS_30));
 var __VLS_12;
 var __VLS_8;
-const __VLS_33 = {}.VAppBar;
+const __VLS_29 = {}.VAppBar;
 /** @type {[typeof __VLS_components.VAppBar, typeof __VLS_components.vAppBar, typeof __VLS_components.VAppBar, typeof __VLS_components.vAppBar, ]} */ ;
+// @ts-ignore
+const __VLS_30 = __VLS_asFunctionalComponent(__VLS_29, new __VLS_29({}));
+const __VLS_31 = __VLS_30({}, ...__VLS_functionalComponentArgsRest(__VLS_30));
+__VLS_32.slots.default;
+const __VLS_33 = {}.VAppBarTitle;
+/** @type {[typeof __VLS_components.VAppBarTitle, typeof __VLS_components.vAppBarTitle, typeof __VLS_components.VAppBarTitle, typeof __VLS_components.vAppBarTitle, ]} */ ;
 // @ts-ignore
 const __VLS_34 = __VLS_asFunctionalComponent(__VLS_33, new __VLS_33({}));
 const __VLS_35 = __VLS_34({}, ...__VLS_functionalComponentArgsRest(__VLS_34));
 __VLS_36.slots.default;
-const __VLS_37 = {}.VAppBarTitle;
-/** @type {[typeof __VLS_components.VAppBarTitle, typeof __VLS_components.vAppBarTitle, typeof __VLS_components.VAppBarTitle, typeof __VLS_components.vAppBarTitle, ]} */ ;
+var __VLS_36;
+var __VLS_32;
+const __VLS_37 = {}.VMain;
+/** @type {[typeof __VLS_components.VMain, typeof __VLS_components.vMain, typeof __VLS_components.VMain, typeof __VLS_components.vMain, ]} */ ;
 // @ts-ignore
 const __VLS_38 = __VLS_asFunctionalComponent(__VLS_37, new __VLS_37({}));
 const __VLS_39 = __VLS_38({}, ...__VLS_functionalComponentArgsRest(__VLS_38));
 __VLS_40.slots.default;
-var __VLS_40;
-var __VLS_36;
-const __VLS_41 = {}.VMain;
-/** @type {[typeof __VLS_components.VMain, typeof __VLS_components.vMain, typeof __VLS_components.VMain, typeof __VLS_components.vMain, ]} */ ;
+const __VLS_41 = {}.VContainer;
+/** @type {[typeof __VLS_components.VContainer, typeof __VLS_components.vContainer, typeof __VLS_components.VContainer, typeof __VLS_components.vContainer, ]} */ ;
 // @ts-ignore
 const __VLS_42 = __VLS_asFunctionalComponent(__VLS_41, new __VLS_41({}));
 const __VLS_43 = __VLS_42({}, ...__VLS_functionalComponentArgsRest(__VLS_42));
 __VLS_44.slots.default;
-const __VLS_45 = {}.VContainer;
-/** @type {[typeof __VLS_components.VContainer, typeof __VLS_components.vContainer, typeof __VLS_components.VContainer, typeof __VLS_components.vContainer, ]} */ ;
+const __VLS_45 = {}.RouterView;
+/** @type {[typeof __VLS_components.RouterView, typeof __VLS_components.routerView, ]} */ ;
 // @ts-ignore
 const __VLS_46 = __VLS_asFunctionalComponent(__VLS_45, new __VLS_45({}));
 const __VLS_47 = __VLS_46({}, ...__VLS_functionalComponentArgsRest(__VLS_46));
-__VLS_48.slots.default;
-const __VLS_49 = {}.RouterView;
-/** @type {[typeof __VLS_components.RouterView, typeof __VLS_components.routerView, ]} */ ;
-// @ts-ignore
-const __VLS_50 = __VLS_asFunctionalComponent(__VLS_49, new __VLS_49({}));
-const __VLS_51 = __VLS_50({}, ...__VLS_functionalComponentArgsRest(__VLS_50));
-var __VLS_48;
 var __VLS_44;
+var __VLS_40;
 var __VLS_3;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({

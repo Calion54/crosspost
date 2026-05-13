@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_PIPE } from '@nestjs/core';
+import { APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -15,6 +15,8 @@ import { AccountsModule } from './accounts/accounts.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { MediaModule } from './media/media.module.js';
 import { PublishModule } from './publish/publish.module.js';
+import { AuthModule } from './auth/auth.module.js';
+import { AuthGuard } from './auth/auth.guard.js';
 
 @Module({
   imports: [
@@ -35,11 +37,13 @@ import { PublishModule } from './publish/publish.module.js';
     SyncModule,
     MediaModule,
     PublishModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     { provide: APP_PIPE, useClass: ZodValidationPipe },
+    { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
 export class AppModule {}
