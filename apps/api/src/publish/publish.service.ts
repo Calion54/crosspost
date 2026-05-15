@@ -1,25 +1,24 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { PublicationStatus } from '@crosspost/shared';
+import { Queue, QueueEvents } from 'bullmq';
+import {
+  PublicationStatus,
+  BROWSER_QUEUE,
+  BrowserJobName,
+  type PublishJobData,
+  type PublishJobResult,
+} from '@crosspost/shared';
 import { Account, type AccountDocument } from '../accounts/schemas/account.schema.js';
 import { Listing, type ListingDocument } from '../listings/schemas/listing.schema.js';
 import {
   Publication,
   type PublicationDocument,
 } from '../publications/schemas/publication.schema.js';
-import { BrowserService } from '../browser/browser.service.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
-import { ScrapeDebugService } from '../common/debug/scrape-debug.service.js';
 import { MediaService } from '../media/media.service.js';
-import { SelectorRegistryService } from './registry/selector-registry.service.js';
-import { waitForPageSettle } from './helpers/page.helpers.js';
-import type { StepResult } from './helpers/form.helpers.js';
-import type { PlatformPublisher, ListingData } from './platforms/platform-publisher.js';
-import { LeboncoinPublisher } from './platforms/leboncoin/leboncoin.publisher.js';
 
 export type PublishStatus = 'idle' | 'publishing' | 'success' | 'error';
 
@@ -36,26 +35,24 @@ export interface PublishSession {
 export class PublishService {
   private readonly logger = new Logger(PublishService.name);
   private publishSessions = new Map<string, PublishSession>();
-  private publishers: Record<string, PlatformPublisher>;
 
   constructor(
     @InjectModel(Account.name) private accountModel: Model<AccountDocument>,
     @InjectModel(Listing.name) private listingModel: Model<ListingDocument>,
     @InjectModel(Publication.name)
     private publicationModel: Model<PublicationDocument>,
-    private browserService: BrowserService,
+    @InjectQueue(BROWSER_QUEUE) private browserQueue: Queue,
     private encryptionService: EncryptionService,
-    private scrapeDebug: ScrapeDebugService,
     private mediaService: MediaService,
-    private registry: SelectorRegistryService,
+    private configService: ConfigService,
   ) {
-    const leboncoin = new LeboncoinPublisher(this.registry);
-    this.registry.registerDefaults('leboncoin', leboncoin.defaultRegistry);
-
-    this.publishers = {
-      leboncoin,
+    this.redisConnection = {
+      host: this.configService.get('REDIS_HOST', 'localhost'),
+      port: this.configService.get<number>('REDIS_PORT', 6379),
     };
   }
+
+  private readonly redisConnection: { host: string; port: number };
 
   getPublishStatus(sessionId: string): PublishSession | null {
     return this.publishSessions.get(sessionId) ?? null;
@@ -92,92 +89,59 @@ export class PublishService {
     if (!account) throw new NotFoundException('Account not found');
     if (!account.encryptedCookies) throw new Error('Account not connected');
 
-    const publisher = this.publishers[account.platform];
-    if (!publisher) {
-      throw new Error(`No publisher for platform: ${account.platform}`);
-    }
-
     const listing = await this.listingModel.findById(listingId).exec();
     if (!listing) throw new NotFoundException('Listing not found');
-
-    // Load registry (with overrides if file exists)
-    await this.registry.load(account.platform);
 
     const cookies = JSON.parse(
       this.encryptionService.decrypt(account.encryptedCookies),
     );
 
-    const imagePaths = await this.downloadImages(listing.media || []);
+    // Get presigned URLs for images
+    const imageUrls: string[] = [];
+    for (const media of listing.media || []) {
+      try {
+        const url = await this.mediaService.getSignedUrl(media.key);
+        imageUrls.push(url);
+      } catch {
+        this.logger.warn(`[publish] Could not get signed URL for ${media.key}`);
+      }
+    }
 
-    const context = await this.browserService.getPersistentContext(
-      accountId,
-      account.userAgent,
+    // Enqueue browser job
+    const job = await this.browserQueue.add(
+      BrowserJobName.PUBLISH,
+      {
+        platform: account.platform,
+        cookies,
+        userAgent: account.userAgent,
+        accountId,
+        listing: {
+          title: listing.title,
+          description: listing.description,
+          price: listing.price,
+          category: listing.category,
+          condition: listing.condition,
+          color: listing.color,
+          packageSize: listing.packageSize,
+          location: listing.location,
+        },
+        imageUrls,
+      } satisfies PublishJobData,
     );
-    await this.browserService.injectCookies(accountId, cookies);
 
-    const page = await context.newPage();
-    let snapshotCount = 0;
+    const queueEvents = new QueueEvents(BROWSER_QUEUE, {
+      connection: this.redisConnection,
+    });
+
+    // Listen for progress (step updates)
+    const onProgress = ({ jobId, data }: { jobId: string; data: any }) => {
+      if (jobId !== job.id) return;
+      this.updateSession(sessionId, { step: data.step });
+    };
+    queueEvents.on('progress', onProgress);
 
     try {
-      // Navigate
-      this.updateSession(sessionId, { step: 'navigating' });
-      await page.goto(publisher.startUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30_000,
-      });
-      await waitForPageSettle(page);
-
-      // Initial snapshot
-      await this.scrapeDebug.captureSnapshot(page, {
-        platform: account.platform,
-        externalId: `publish_start_${listingId}`,
-        extractedData: { listingId },
-        saveFullHtml: true,
-      });
-
-      // Build listing data
-      const listingData: ListingData = {
-        title: listing.title,
-        description: listing.description,
-        price: listing.price,
-        category: listing.category,
-        condition: listing.condition,
-        color: listing.color,
-        packageSize: listing.packageSize,
-        location: listing.location,
-      };
-
-      // Run deterministic workflow
-      for (const step of publisher.steps) {
-        this.updateSession(sessionId, { step: step.name });
-        this.logger.debug(`[publish] Step: ${step.name}`);
-
-        try {
-          await step.run({ page, listing: listingData, imagePaths });
-        } catch (err: any) {
-          this.logger.warn(`[publish] Step "${step.name}" failed: ${err.message}`);
-          // Take snapshot on failure
-          await this.scrapeDebug.captureSnapshot(page, {
-            platform: account.platform,
-            externalId: `publish_fail_${step.name}_${listingId}`,
-            extractedData: { step: step.name, error: err.message },
-          });
-          throw err;
-        }
-
-        // Snapshot after each step (full HTML for first 3 steps to debug)
-        await this.scrapeDebug.captureSnapshot(page, {
-          platform: account.platform,
-          externalId: `publish_step_${step.name}_${listingId}`,
-          extractedData: { step: step.name },
-          saveFullHtml: snapshotCount < 15,
-        });
-        snapshotCount++;
-      }
-
-      // Extract result
-      this.updateSession(sessionId, { step: 'verifying' });
-      const result = await publisher.extractResult(page);
+      const result = await job.waitUntilFinished(queueEvents, 300_000) as PublishJobResult;
 
       // Save publication
       await this.publicationModel.findOneAndUpdate(
@@ -206,70 +170,10 @@ export class PublishService {
         `Published listing ${listingId} on ${account.platform} → ${result.externalUrl}`,
       );
     } catch (error: any) {
-      try {
-        await this.scrapeDebug.captureSnapshot(page, {
-          platform: account.platform,
-          externalId: `publish_error_${listingId}`,
-          extractedData: { error: error.message, listingId },
-          saveFullHtml: true,
-        });
-      } catch {
-        /* ignore */
-      }
       throw error;
     } finally {
-      await page.close();
-      this.cleanupImages(imagePaths);
-    }
-  }
-
-  // ─── Image helpers ─────────────────────────────────────────────
-
-  private async downloadImages(
-    media: { key: string; contentType: string }[],
-  ): Promise<string[]> {
-    if (media.length === 0) return [];
-
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crosspost-'));
-    const filePaths: string[] = [];
-
-    for (let i = 0; i < media.length; i++) {
-      const { key } = media[i];
-      const ext = key.split('.').pop() || 'jpg';
-      try {
-        const url = await this.mediaService.getSignedUrl(key);
-        const response = await fetch(url);
-        if (response.ok) {
-          const buffer = Buffer.from(await response.arrayBuffer());
-          const filePath = path.join(tmpDir, `image_${i}.${ext}`);
-          fs.writeFileSync(filePath, buffer);
-          filePaths.push(filePath);
-        }
-      } catch {
-        this.logger.warn(`[publish] Could not download image: ${key}`);
-      }
-    }
-
-    this.logger.debug(
-      `[publish] Downloaded ${filePaths.length}/${media.length} images`,
-    );
-    return filePaths;
-  }
-
-  private cleanupImages(filePaths: string[]) {
-    for (const fp of filePaths) {
-      try {
-        fs.unlinkSync(fp);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (filePaths.length > 0) {
-      try {
-        fs.rmdirSync(path.dirname(filePaths[0]));
-      } catch {
-        /* ignore */
-      }
+      queueEvents.off('progress', onProgress);
+      await queueEvents.close();
     }
   }
 

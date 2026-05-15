@@ -1,9 +1,22 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
-import { Platform } from '@crosspost/shared';
+import { Queue, QueueEvents } from 'bullmq';
+import { Subject } from 'rxjs';
+import {
+  Platform,
+  BROWSER_QUEUE,
+  BrowserJobName,
+  type ConnectJobData,
+  type ConnectJobResult,
+  type ConnectJobProgress,
+  type CheckSessionJobData,
+  type CheckSessionJobResult,
+  type LogoutJobData,
+} from '@crosspost/shared';
 import { Account, type AccountDocument } from './schemas/account.schema.js';
-import { BrowserService } from '../browser/browser.service.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
 
 const PLATFORM_CONFIG: Record<
@@ -29,25 +42,58 @@ const PLATFORM_CONFIG: Record<
   },
 };
 
-export type ConnectStatus = 'idle' | 'waiting_for_login' | 'success' | 'error';
+export type ConnectStatus =
+  | 'starting'
+  | 'browser_ready'
+  | 'waiting_for_login'
+  | 'success'
+  | 'error';
 
 export interface ConnectSession {
   status: ConnectStatus;
   platform: Platform;
   error?: string;
   accountId?: string;
+  vncUrl?: string;
+  vncToken?: string;
 }
 
 @Injectable()
 export class AccountsService {
   private readonly logger = new Logger(AccountsService.name);
   private connectSessions = new Map<string, ConnectSession>();
+  private sessionSubjects = new Map<string, Subject<ConnectSession>>();
+  private queueEvents: QueueEvents;
 
   constructor(
     @InjectModel(Account.name) private accountModel: Model<AccountDocument>,
-    private browserService: BrowserService,
+    @InjectQueue(BROWSER_QUEUE) private browserQueue: Queue,
     private encryptionService: EncryptionService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.redisConnection = {
+      host: this.configService.get('REDIS_HOST', 'localhost'),
+      port: this.configService.get<number>('REDIS_PORT', 6379),
+    };
+    console.log(`>>> QueueEvents connecting to Redis ${this.redisConnection.host}:${this.redisConnection.port}`);
+    this.queueEvents = new QueueEvents(BROWSER_QUEUE, {
+      connection: this.redisConnection,
+    });
+    this.queueEvents.on('error', (err) => {
+      this.logger.error(`[QueueEvents] error: ${err.message}`);
+    });
+
+    // Debug: listen to ALL events
+    const origEmit = this.queueEvents.emit.bind(this.queueEvents);
+    this.queueEvents.emit = (event: any, ...args: any[]) => {
+      if (event !== 'error') {
+        console.log(`>>> QueueEvents event: "${event}"`, JSON.stringify(args[0])?.slice(0, 200));
+      }
+      return origEmit(event, ...args);
+    };
+  }
+
+  private readonly redisConnection: { host: string; port: number };
 
   findAll(userId: string) {
     return this.accountModel
@@ -70,98 +116,77 @@ export class AccountsService {
     return this.connectSessions.get(sessionId) ?? null;
   }
 
+  getSessionSubject(sessionId: string): Subject<ConnectSession> | undefined {
+    return this.sessionSubjects.get(sessionId);
+  }
+
   startConnect(userId: string, platform: Platform): string {
+    const sessionId = crypto.randomUUID();
     const config = PLATFORM_CONFIG[platform];
 
-    const sessionId = crypto.randomUUID();
-    this.connectSessions.set(sessionId, {
-      status: 'waiting_for_login',
-      platform,
-    });
+    const initial: ConnectSession = { status: 'starting', platform };
+    this.connectSessions.set(sessionId, initial);
+    this.sessionSubjects.set(sessionId, new Subject<ConnectSession>());
 
-    // Fire and forget — browser stays open until user logs in
-    this.runConnect(sessionId, userId, platform, config.loginUrl).catch(
-      (error) => {
-        this.logger.error(
-          `Connect session ${sessionId} failed: ${error.message}`,
-        );
-        this.connectSessions.set(sessionId, {
-          status: 'error',
-          platform,
-          error: error.message,
-        });
-      },
-    );
+    this.enqueueConnect(sessionId, userId, platform, config).catch((error) => {
+      this.logger.error(`Connect ${sessionId} failed: ${error.message}`);
+      this.updateSession(sessionId, {
+        status: 'error',
+        platform,
+        error: error.message,
+      });
+    });
 
     return sessionId;
   }
 
-  private async runConnect(
+  private async enqueueConnect(
     sessionId: string,
     userId: string,
     platform: Platform,
-    loginUrl: string,
+    config: (typeof PLATFORM_CONFIG)[Platform],
   ) {
-    this.logger.log(`Launching browser for ${platform} login...`);
+    console.log(`>>> enqueueConnect: adding job ${sessionId}`);
+    console.log(`>>> QueueEvents name: ${this.queueEvents.name}`);
 
-    const browser = await this.browserService.launchBrowser(false);
-    const context = await browser.newContext({
-      locale: 'fr-FR',
-      viewport: { width: 1280, height: 800 },
-    });
-    const page = await context.newPage();
+    const job = await this.browserQueue.add(
+      BrowserJobName.CONNECT,
+      {
+        platform,
+        loginUrl: config.loginUrl,
+        authCookie: config.authCookie,
+      } satisfies ConnectJobData,
+      { jobId: sessionId },
+    );
+
+    console.log(`>>> Job added: ${job.id}`);
+
+    // Test: is QueueEvents actually receiving anything?
+    await this.queueEvents.waitUntilReady();
+    console.log(`>>> QueueEvents is ready, listening for progress on queue "${this.queueEvents.name}"`);
+
+    // Listen for progress updates (VNC ready, waiting for login)
+    const onProgress = async ({ jobId, data }: { jobId: string; data: any }) => {
+      console.log(`>>> onProgress: jobId=${jobId}, data=${JSON.stringify(data)}`);
+      if (jobId !== sessionId) return;
+      const progress = data as ConnectJobProgress;
+
+      this.updateSession(sessionId, {
+        status: progress.status,
+        platform,
+        vncUrl: progress.vncUrl,
+        vncToken: progress.vncToken,
+      });
+    };
+
+    this.queueEvents.on('progress', onProgress);
 
     try {
-      await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+      const result = await job.waitUntilFinished(this.queueEvents, 310_000) as ConnectJobResult;
 
-      // Capture email from login form before user submits
-      let email = '';
-      page.on('request', (request) => {
-        try {
-          const postData = request.postData();
-          if (postData && request.url().includes('auth')) {
-            const parsed = JSON.parse(postData);
-            if (parsed.email) email = parsed.email;
-          }
-        } catch {
-          // Not JSON, ignore
-        }
-      });
-
-      this.logger.log(`Waiting for manual login on ${platform}...`);
-
-      // Poll for auth cookie presence (max 5 min)
-      const authCookieName = PLATFORM_CONFIG[platform].authCookie;
-      const deadline = Date.now() + 300_000;
-      let authenticated = false;
-
-      while (Date.now() < deadline) {
-        await page.waitForTimeout(2000);
-        const cookies = await context.cookies();
-        const cookieNames = cookies.map((c) => c.name);
-        this.logger.debug(
-          `[${platform}] Cookies found: ${cookieNames.join(', ')}`,
-        );
-        if (cookies.some((c) => c.name === authCookieName)) {
-          authenticated = true;
-          break;
-        }
-      }
-
-      if (!authenticated) {
-        throw new Error('Login timed out after 5 minutes');
-      }
-
-      // Give time for session to fully settle
-      await page.waitForTimeout(2000);
-
-      const cookies = await context.cookies();
-      const userAgent = await page.evaluate(() => navigator.userAgent);
-
-      const username = email || `${platform} account`;
-
+      const username = result.email || `${platform} account`;
       const encryptedCookies = this.encryptionService.encrypt(
-        JSON.stringify(cookies),
+        JSON.stringify(result.cookies),
       );
 
       const account = await this.accountModel
@@ -172,7 +197,7 @@ export class AccountsService {
             platform,
             username,
             encryptedCookies,
-            userAgent,
+            userAgent: result.userAgent,
             isConnected: true,
             lastCheckedAt: new Date(),
           },
@@ -180,25 +205,34 @@ export class AccountsService {
         )
         .exec();
 
-      this.logger.log(
-        `Successfully connected ${platform} account (${username})`,
-      );
+      this.logger.log(`Successfully connected ${platform} account (${username})`);
 
-      this.connectSessions.set(sessionId, {
+      this.updateSession(sessionId, {
         status: 'success',
         platform,
         accountId: account._id.toString(),
       });
     } catch (error: any) {
-      this.logger.error(`Login failed for ${platform}: ${error.message}`);
-      this.connectSessions.set(sessionId, {
+      this.logger.error(`Connect failed for ${platform}: ${error.message}`);
+      this.updateSession(sessionId, {
         status: 'error',
         platform,
         error: error.message,
       });
     } finally {
-      await context.close();
-      await this.browserService.closeBrowser();
+      this.queueEvents.off('progress', onProgress);
+    }
+  }
+
+  private updateSession(sessionId: string, session: ConnectSession) {
+    this.connectSessions.set(sessionId, session);
+    const subject = this.sessionSubjects.get(sessionId);
+    if (subject) {
+      subject.next(session);
+      if (session.status === 'success' || session.status === 'error') {
+        subject.complete();
+        this.sessionSubjects.delete(sessionId);
+      }
     }
   }
 
@@ -207,9 +241,7 @@ export class AccountsService {
     id: string,
   ): Promise<{ isValid: boolean }> {
     const account = await this.accountModel.findOne({ _id: id, userId }).exec();
-    if (!account?.encryptedCookies) {
-      return { isValid: false };
-    }
+    if (!account?.encryptedCookies) return { isValid: false };
 
     let cookies: Record<string, unknown>[];
     try {
@@ -230,27 +262,28 @@ export class AccountsService {
     const config = PLATFORM_CONFIG[account.platform];
 
     try {
-      const context = await this.browserService.createContext(
-        cookies,
-        account.userAgent,
+      const job = await this.browserQueue.add(
+        BrowserJobName.CHECK_SESSION,
+        {
+          cookies,
+          userAgent: account.userAgent,
+          checkUrl: config.checkUrl,
+        } satisfies CheckSessionJobData,
       );
-      const page = await context.newPage();
 
-      await page.goto(config.checkUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 15_000,
+      const queueEvents = new QueueEvents(BROWSER_QUEUE, {
+        connection: this.redisConnection,
       });
 
-      const url = page.url();
-      const isValid = !url.includes('connexion') && !url.includes('login');
+      const result = await job.waitUntilFinished(queueEvents, 30_000) as CheckSessionJobResult;
+      await queueEvents.close();
 
       await this.accountModel.findByIdAndUpdate(id, {
-        isConnected: isValid,
+        isConnected: result.isValid,
         lastCheckedAt: new Date(),
       });
 
-      await context.close();
-      return { isValid };
+      return result;
     } catch {
       await this.accountModel.findByIdAndUpdate(id, {
         isConnected: false,
@@ -264,22 +297,19 @@ export class AccountsService {
     const account = await this.accountModel.findOne({ _id: id, userId }).exec();
     if (!account) throw new NotFoundException('Account not found');
 
-    // Try to logout on the platform
+    // Try to logout via browser service
     try {
       const cookies = JSON.parse(
         this.encryptionService.decrypt(account.encryptedCookies),
       );
-      const context = await this.browserService.createContext(
-        cookies,
-        account.userAgent,
+      await this.browserQueue.add(
+        BrowserJobName.LOGOUT,
+        {
+          cookies,
+          userAgent: account.userAgent,
+          logoutUrl: PLATFORM_CONFIG[account.platform].logoutUrl,
+        } satisfies LogoutJobData,
       );
-      const page = await context.newPage();
-      await page.goto(PLATFORM_CONFIG[account.platform].logoutUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 10_000,
-      });
-      await context.close();
-      await this.browserService.closeBrowser();
     } catch (error: any) {
       this.logger.warn(
         `Could not logout from ${account.platform}: ${error.message}`,

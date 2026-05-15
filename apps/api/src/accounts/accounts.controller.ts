@@ -5,11 +5,17 @@ import {
   Delete,
   Param,
   Body,
+  Sse,
   NotFoundException,
 } from '@nestjs/common';
+import { Observable, map, startWith } from 'rxjs';
 import { AccountsService } from './accounts.service.js';
 import type { Platform } from '@crosspost/shared';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator.js';
+
+interface MessageEvent {
+  data: string;
+}
 
 @Controller('accounts')
 export class AccountsController {
@@ -31,11 +37,22 @@ export class AccountsController {
     return { sessionId };
   }
 
-  @Get('connect/:sessionId/status')
-  getConnectStatus(@Param('sessionId') sessionId: string) {
-    const session = this.accountsService.getConnectStatus(sessionId);
-    if (!session) throw new NotFoundException('Connect session not found');
-    return session;
+  @Sse('connect/:sessionId/events')
+  connectEvents(
+    @Param('sessionId') sessionId: string,
+  ): Observable<MessageEvent> {
+    console.log('DEBUG print')
+    const subject = this.accountsService.getSessionSubject(sessionId);
+    if (!subject) throw new NotFoundException('Connect session not found');
+
+    const current = this.accountsService.getConnectStatus(sessionId);
+
+    return subject.pipe(
+      startWith(current),
+      map((session) => ({
+        data: JSON.stringify(session),
+      })),
+    );
   }
 
   @Post(':id/check-session')
@@ -46,7 +63,10 @@ export class AccountsController {
   @Post(':id/reconnect')
   async reconnect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const account = await this.accountsService.findOne(user.userId, id);
-    const sessionId = this.accountsService.startConnect(user.userId, account.platform);
+    const sessionId = this.accountsService.startConnect(
+      user.userId,
+      account.platform,
+    );
     return { sessionId };
   }
 

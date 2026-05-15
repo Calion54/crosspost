@@ -1,6 +1,7 @@
-import { ref, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { Platform } from '@crosspost/shared';
 import apiClient from '@/api/client';
+import VncViewer from '@/components/VncViewer.vue';
 const platforms = [
     { label: 'Leboncoin', value: Platform.LEBONCOIN },
     { label: 'Vinted', value: Platform.VINTED },
@@ -13,8 +14,17 @@ const checkingId = ref(null);
 const removingId = ref(null);
 const syncingId = ref(null);
 const syncMessage = ref('');
-let pollTimer = null;
+const vncUrl = ref(null);
+const showVnc = ref(false);
+const connectLocalMode = ref(false);
+let eventSource = null;
 let syncPollTimer = null;
+const vncWsUrl = computed(() => {
+    if (!vncUrl.value)
+        return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${vncUrl.value}`;
+});
 async function fetchAccounts() {
     isLoading.value = true;
     try {
@@ -25,44 +35,81 @@ async function fetchAccounts() {
         isLoading.value = false;
     }
 }
-async function pollConnectStatus(sessionId) {
-    pollTimer = setInterval(async () => {
+function listenToConnectEvents(sessionId) {
+    closeEventSource();
+    eventSource = new EventSource(`/api/accounts/connect/${sessionId}/events`);
+    eventSource.onmessage = (event) => {
         try {
-            const { data } = await apiClient.get(`/accounts/connect/${sessionId}/status`);
-            if (data.status === 'success') {
-                stopPolling();
-                connecting.value = false;
-                await fetchAccounts();
+            const session = JSON.parse(event.data);
+            if (session.status === 'browser_ready') {
+                if (session.vncUrl) {
+                    vncUrl.value = session.vncUrl;
+                    showVnc.value = true;
+                }
+                else {
+                    connectLocalMode.value = true;
+                }
             }
-            else if (data.status === 'error') {
-                stopPolling();
+            if (session.status === 'success') {
+                closeEventSource();
                 connecting.value = false;
-                connectError.value = data.error || 'La connexion a echoue';
+                showVnc.value = false;
+                vncUrl.value = null;
+                connectLocalMode.value = false;
+                fetchAccounts();
+            }
+            else if (session.status === 'error') {
+                closeEventSource();
+                connecting.value = false;
+                showVnc.value = false;
+                vncUrl.value = null;
+                connectLocalMode.value = false;
+                connectError.value = session.error || 'La connexion a echoue';
             }
         }
         catch {
-            stopPolling();
-            connecting.value = false;
-            connectError.value = 'Erreur lors de la verification du statut';
+            // ignore parse errors
         }
-    }, 2000);
+    };
+    eventSource.onerror = () => {
+        closeEventSource();
+        if (connecting.value) {
+            connecting.value = false;
+            showVnc.value = false;
+            vncUrl.value = null;
+            connectError.value = 'Connexion au serveur perdue';
+        }
+    };
 }
-function stopPolling() {
-    if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+function closeEventSource() {
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
     }
 }
+function cancelConnect() {
+    closeEventSource();
+    connecting.value = false;
+    showVnc.value = false;
+    vncUrl.value = null;
+    connectLocalMode.value = false;
+}
+function onVncDisconnect() {
+    // VNC disconnected — the session may still be running,
+    // SSE will handle the final status update
+}
 onUnmounted(() => {
-    stopPolling();
+    closeEventSource();
     stopSyncPolling();
 });
 async function connectAccount(platform) {
     connecting.value = true;
     connectError.value = '';
+    vncUrl.value = null;
+    connectLocalMode.value = false;
     try {
         const { data } = await apiClient.post('/accounts/connect', { platform });
-        pollConnectStatus(data.sessionId);
+        listenToConnectEvents(data.sessionId);
     }
     catch {
         connecting.value = false;
@@ -89,9 +136,11 @@ async function checkSession(id) {
 async function reconnect(id) {
     connecting.value = true;
     connectError.value = '';
+    vncUrl.value = null;
+    connectLocalMode.value = false;
     try {
         const { data } = await apiClient.post(`/accounts/${id}/reconnect`);
-        pollConnectStatus(data.sessionId);
+        listenToConnectEvents(data.sessionId);
     }
     catch {
         connecting.value = false;
@@ -224,7 +273,7 @@ for (const [p] of __VLS_getVForSourceType((__VLS_ctx.platforms))) {
 }
 var __VLS_15;
 var __VLS_7;
-if (__VLS_ctx.connecting) {
+if (__VLS_ctx.connecting && !__VLS_ctx.showVnc) {
     const __VLS_24 = {}.VAlert;
     /** @type {[typeof __VLS_components.VAlert, typeof __VLS_components.vAlert, typeof __VLS_components.VAlert, typeof __VLS_components.vAlert, ]} */ ;
     // @ts-ignore
@@ -237,6 +286,9 @@ if (__VLS_ctx.connecting) {
         ...{ class: "mb-4" },
     }, ...__VLS_functionalComponentArgsRest(__VLS_25));
     __VLS_27.slots.default;
+    (__VLS_ctx.connectLocalMode
+        ? 'Un navigateur s\'est ouvert. Connecte-toi manuellement puis reviens ici.'
+        : 'Demarrage du navigateur distant...');
     const __VLS_28 = {}.VProgressLinear;
     /** @type {[typeof __VLS_components.VProgressLinear, typeof __VLS_components.vProgressLinear, ]} */ ;
     // @ts-ignore
@@ -310,12 +362,100 @@ if (__VLS_ctx.syncMessage) {
     (__VLS_ctx.syncMessage);
     var __VLS_43;
 }
-const __VLS_48 = {}.VTable;
+const __VLS_48 = {}.VDialog;
+/** @type {[typeof __VLS_components.VDialog, typeof __VLS_components.vDialog, typeof __VLS_components.VDialog, typeof __VLS_components.vDialog, ]} */ ;
+// @ts-ignore
+const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({
+    modelValue: (__VLS_ctx.showVnc),
+    width: "1320",
+    persistent: true,
+}));
+const __VLS_50 = __VLS_49({
+    modelValue: (__VLS_ctx.showVnc),
+    width: "1320",
+    persistent: true,
+}, ...__VLS_functionalComponentArgsRest(__VLS_49));
+__VLS_51.slots.default;
+const __VLS_52 = {}.VCard;
+/** @type {[typeof __VLS_components.VCard, typeof __VLS_components.vCard, typeof __VLS_components.VCard, typeof __VLS_components.vCard, ]} */ ;
+// @ts-ignore
+const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({}));
+const __VLS_54 = __VLS_53({}, ...__VLS_functionalComponentArgsRest(__VLS_53));
+__VLS_55.slots.default;
+const __VLS_56 = {}.VCardTitle;
+/** @type {[typeof __VLS_components.VCardTitle, typeof __VLS_components.vCardTitle, typeof __VLS_components.VCardTitle, typeof __VLS_components.vCardTitle, ]} */ ;
+// @ts-ignore
+const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
+    ...{ class: "d-flex align-center" },
+}));
+const __VLS_58 = __VLS_57({
+    ...{ class: "d-flex align-center" },
+}, ...__VLS_functionalComponentArgsRest(__VLS_57));
+__VLS_59.slots.default;
+const __VLS_60 = {}.VSpacer;
+/** @type {[typeof __VLS_components.VSpacer, typeof __VLS_components.vSpacer, ]} */ ;
+// @ts-ignore
+const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({}));
+const __VLS_62 = __VLS_61({}, ...__VLS_functionalComponentArgsRest(__VLS_61));
+const __VLS_64 = {}.VBtn;
+/** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
+// @ts-ignore
+const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
+    ...{ 'onClick': {} },
+    icon: "mdi-close",
+    variant: "text",
+}));
+const __VLS_66 = __VLS_65({
+    ...{ 'onClick': {} },
+    icon: "mdi-close",
+    variant: "text",
+}, ...__VLS_functionalComponentArgsRest(__VLS_65));
+let __VLS_68;
+let __VLS_69;
+let __VLS_70;
+const __VLS_71 = {
+    onClick: (__VLS_ctx.cancelConnect)
+};
+var __VLS_67;
+var __VLS_59;
+const __VLS_72 = {}.VCardText;
+/** @type {[typeof __VLS_components.VCardText, typeof __VLS_components.vCardText, typeof __VLS_components.VCardText, typeof __VLS_components.vCardText, ]} */ ;
+// @ts-ignore
+const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
+    ...{ class: "pa-0" },
+}));
+const __VLS_74 = __VLS_73({
+    ...{ class: "pa-0" },
+}, ...__VLS_functionalComponentArgsRest(__VLS_73));
+__VLS_75.slots.default;
+if (__VLS_ctx.vncWsUrl) {
+    /** @type {[typeof VncViewer, ]} */ ;
+    // @ts-ignore
+    const __VLS_76 = __VLS_asFunctionalComponent(VncViewer, new VncViewer({
+        ...{ 'onDisconnect': {} },
+        url: (__VLS_ctx.vncWsUrl),
+    }));
+    const __VLS_77 = __VLS_76({
+        ...{ 'onDisconnect': {} },
+        url: (__VLS_ctx.vncWsUrl),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_76));
+    let __VLS_79;
+    let __VLS_80;
+    let __VLS_81;
+    const __VLS_82 = {
+        onDisconnect: (__VLS_ctx.onVncDisconnect)
+    };
+    var __VLS_78;
+}
+var __VLS_75;
+var __VLS_55;
+var __VLS_51;
+const __VLS_83 = {}.VTable;
 /** @type {[typeof __VLS_components.VTable, typeof __VLS_components.vTable, typeof __VLS_components.VTable, typeof __VLS_components.vTable, ]} */ ;
 // @ts-ignore
-const __VLS_49 = __VLS_asFunctionalComponent(__VLS_48, new __VLS_48({}));
-const __VLS_50 = __VLS_49({}, ...__VLS_functionalComponentArgsRest(__VLS_49));
-__VLS_51.slots.default;
+const __VLS_84 = __VLS_asFunctionalComponent(__VLS_83, new __VLS_83({}));
+const __VLS_85 = __VLS_84({}, ...__VLS_functionalComponentArgsRest(__VLS_84));
+__VLS_86.slots.default;
 __VLS_asFunctionalElement(__VLS_intrinsicElements.thead, __VLS_intrinsicElements.thead)({});
 __VLS_asFunctionalElement(__VLS_intrinsicElements.tr, __VLS_intrinsicElements.tr)({});
 __VLS_asFunctionalElement(__VLS_intrinsicElements.th, __VLS_intrinsicElements.th)({});
@@ -340,57 +480,57 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
     (account.username);
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
-    const __VLS_52 = {}.VChip;
+    const __VLS_87 = {}.VChip;
     /** @type {[typeof __VLS_components.VChip, typeof __VLS_components.vChip, typeof __VLS_components.VChip, typeof __VLS_components.vChip, ]} */ ;
     // @ts-ignore
-    const __VLS_53 = __VLS_asFunctionalComponent(__VLS_52, new __VLS_52({
+    const __VLS_88 = __VLS_asFunctionalComponent(__VLS_87, new __VLS_87({
         color: (account.isConnected ? 'success' : 'error'),
         size: "small",
     }));
-    const __VLS_54 = __VLS_53({
+    const __VLS_89 = __VLS_88({
         color: (account.isConnected ? 'success' : 'error'),
         size: "small",
-    }, ...__VLS_functionalComponentArgsRest(__VLS_53));
-    __VLS_55.slots.default;
+    }, ...__VLS_functionalComponentArgsRest(__VLS_88));
+    __VLS_90.slots.default;
     (account.isConnected ? 'Connecte' : 'Session expiree');
-    var __VLS_55;
+    var __VLS_90;
     if (__VLS_ctx.checkResult && __VLS_ctx.checkResult.id === account._id) {
-        const __VLS_56 = {}.VIcon;
+        const __VLS_91 = {}.VIcon;
         /** @type {[typeof __VLS_components.VIcon, typeof __VLS_components.vIcon, ]} */ ;
         // @ts-ignore
-        const __VLS_57 = __VLS_asFunctionalComponent(__VLS_56, new __VLS_56({
+        const __VLS_92 = __VLS_asFunctionalComponent(__VLS_91, new __VLS_91({
             icon: (__VLS_ctx.checkResult.isValid ? 'mdi-check-circle' : 'mdi-alert-circle'),
             color: (__VLS_ctx.checkResult.isValid ? 'success' : 'error'),
             size: "small",
             ...{ class: "ml-2" },
         }));
-        const __VLS_58 = __VLS_57({
+        const __VLS_93 = __VLS_92({
             icon: (__VLS_ctx.checkResult.isValid ? 'mdi-check-circle' : 'mdi-alert-circle'),
             color: (__VLS_ctx.checkResult.isValid ? 'success' : 'error'),
             size: "small",
             ...{ class: "ml-2" },
-        }, ...__VLS_functionalComponentArgsRest(__VLS_57));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_92));
     }
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
     (account.lastCheckedAt ? new Date(account.lastCheckedAt).toLocaleString('fr-FR') : '-');
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
-    const __VLS_60 = {}.VTooltip;
+    const __VLS_95 = {}.VTooltip;
     /** @type {[typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, ]} */ ;
     // @ts-ignore
-    const __VLS_61 = __VLS_asFunctionalComponent(__VLS_60, new __VLS_60({
+    const __VLS_96 = __VLS_asFunctionalComponent(__VLS_95, new __VLS_95({
         text: "Verifier la session",
     }));
-    const __VLS_62 = __VLS_61({
+    const __VLS_97 = __VLS_96({
         text: "Verifier la session",
-    }, ...__VLS_functionalComponentArgsRest(__VLS_61));
-    __VLS_63.slots.default;
+    }, ...__VLS_functionalComponentArgsRest(__VLS_96));
+    __VLS_98.slots.default;
     {
-        const { activator: __VLS_thisSlot } = __VLS_63.slots;
+        const { activator: __VLS_thisSlot } = __VLS_98.slots;
         const [{ props }] = __VLS_getSlotParams(__VLS_thisSlot);
-        const __VLS_64 = {}.VBtn;
+        const __VLS_99 = {}.VBtn;
         /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
         // @ts-ignore
-        const __VLS_65 = __VLS_asFunctionalComponent(__VLS_64, new __VLS_64({
+        const __VLS_100 = __VLS_asFunctionalComponent(__VLS_99, new __VLS_99({
             ...{ 'onClick': {} },
             ...(props),
             icon: "mdi-refresh",
@@ -398,43 +538,43 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
             variant: "text",
             loading: (__VLS_ctx.checkingId === account._id),
         }));
-        const __VLS_66 = __VLS_65({
+        const __VLS_101 = __VLS_100({
             ...{ 'onClick': {} },
             ...(props),
             icon: "mdi-refresh",
             size: "small",
             variant: "text",
             loading: (__VLS_ctx.checkingId === account._id),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_65));
-        let __VLS_68;
-        let __VLS_69;
-        let __VLS_70;
-        const __VLS_71 = {
+        }, ...__VLS_functionalComponentArgsRest(__VLS_100));
+        let __VLS_103;
+        let __VLS_104;
+        let __VLS_105;
+        const __VLS_106 = {
             onClick: (...[$event]) => {
                 __VLS_ctx.checkSession(account._id);
             }
         };
-        var __VLS_67;
+        var __VLS_102;
     }
-    var __VLS_63;
+    var __VLS_98;
     if (!account.isConnected) {
-        const __VLS_72 = {}.VTooltip;
+        const __VLS_107 = {}.VTooltip;
         /** @type {[typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, ]} */ ;
         // @ts-ignore
-        const __VLS_73 = __VLS_asFunctionalComponent(__VLS_72, new __VLS_72({
+        const __VLS_108 = __VLS_asFunctionalComponent(__VLS_107, new __VLS_107({
             text: "Reconnecter",
         }));
-        const __VLS_74 = __VLS_73({
+        const __VLS_109 = __VLS_108({
             text: "Reconnecter",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_73));
-        __VLS_75.slots.default;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_108));
+        __VLS_110.slots.default;
         {
-            const { activator: __VLS_thisSlot } = __VLS_75.slots;
+            const { activator: __VLS_thisSlot } = __VLS_110.slots;
             const [{ props }] = __VLS_getSlotParams(__VLS_thisSlot);
-            const __VLS_76 = {}.VBtn;
+            const __VLS_111 = {}.VBtn;
             /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
             // @ts-ignore
-            const __VLS_77 = __VLS_asFunctionalComponent(__VLS_76, new __VLS_76({
+            const __VLS_112 = __VLS_asFunctionalComponent(__VLS_111, new __VLS_111({
                 ...{ 'onClick': {} },
                 ...(props),
                 icon: "mdi-link-variant",
@@ -443,7 +583,7 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 color: "warning",
                 disabled: (__VLS_ctx.connecting),
             }));
-            const __VLS_78 = __VLS_77({
+            const __VLS_113 = __VLS_112({
                 ...{ 'onClick': {} },
                 ...(props),
                 icon: "mdi-link-variant",
@@ -451,39 +591,39 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 variant: "text",
                 color: "warning",
                 disabled: (__VLS_ctx.connecting),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_77));
-            let __VLS_80;
-            let __VLS_81;
-            let __VLS_82;
-            const __VLS_83 = {
+            }, ...__VLS_functionalComponentArgsRest(__VLS_112));
+            let __VLS_115;
+            let __VLS_116;
+            let __VLS_117;
+            const __VLS_118 = {
                 onClick: (...[$event]) => {
                     if (!(!account.isConnected))
                         return;
                     __VLS_ctx.reconnect(account._id);
                 }
             };
-            var __VLS_79;
+            var __VLS_114;
         }
-        var __VLS_75;
+        var __VLS_110;
     }
     if (account.isConnected) {
-        const __VLS_84 = {}.VTooltip;
+        const __VLS_119 = {}.VTooltip;
         /** @type {[typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, ]} */ ;
         // @ts-ignore
-        const __VLS_85 = __VLS_asFunctionalComponent(__VLS_84, new __VLS_84({
+        const __VLS_120 = __VLS_asFunctionalComponent(__VLS_119, new __VLS_119({
             text: "Synchroniser les annonces",
         }));
-        const __VLS_86 = __VLS_85({
+        const __VLS_121 = __VLS_120({
             text: "Synchroniser les annonces",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_85));
-        __VLS_87.slots.default;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_120));
+        __VLS_122.slots.default;
         {
-            const { activator: __VLS_thisSlot } = __VLS_87.slots;
+            const { activator: __VLS_thisSlot } = __VLS_122.slots;
             const [{ props }] = __VLS_getSlotParams(__VLS_thisSlot);
-            const __VLS_88 = {}.VBtn;
+            const __VLS_123 = {}.VBtn;
             /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
             // @ts-ignore
-            const __VLS_89 = __VLS_asFunctionalComponent(__VLS_88, new __VLS_88({
+            const __VLS_124 = __VLS_asFunctionalComponent(__VLS_123, new __VLS_123({
                 ...{ 'onClick': {} },
                 ...(props),
                 icon: "mdi-sync",
@@ -492,7 +632,7 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 color: "primary",
                 loading: (__VLS_ctx.syncingId === account._id),
             }));
-            const __VLS_90 = __VLS_89({
+            const __VLS_125 = __VLS_124({
                 ...{ 'onClick': {} },
                 ...(props),
                 icon: "mdi-sync",
@@ -500,38 +640,38 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 variant: "text",
                 color: "primary",
                 loading: (__VLS_ctx.syncingId === account._id),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_89));
-            let __VLS_92;
-            let __VLS_93;
-            let __VLS_94;
-            const __VLS_95 = {
+            }, ...__VLS_functionalComponentArgsRest(__VLS_124));
+            let __VLS_127;
+            let __VLS_128;
+            let __VLS_129;
+            const __VLS_130 = {
                 onClick: (...[$event]) => {
                     if (!(account.isConnected))
                         return;
                     __VLS_ctx.syncAccount(account._id);
                 }
             };
-            var __VLS_91;
+            var __VLS_126;
         }
-        var __VLS_87;
+        var __VLS_122;
     }
-    const __VLS_96 = {}.VTooltip;
+    const __VLS_131 = {}.VTooltip;
     /** @type {[typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, typeof __VLS_components.VTooltip, typeof __VLS_components.vTooltip, ]} */ ;
     // @ts-ignore
-    const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
+    const __VLS_132 = __VLS_asFunctionalComponent(__VLS_131, new __VLS_131({
         text: "Supprimer",
     }));
-    const __VLS_98 = __VLS_97({
+    const __VLS_133 = __VLS_132({
         text: "Supprimer",
-    }, ...__VLS_functionalComponentArgsRest(__VLS_97));
-    __VLS_99.slots.default;
+    }, ...__VLS_functionalComponentArgsRest(__VLS_132));
+    __VLS_134.slots.default;
     {
-        const { activator: __VLS_thisSlot } = __VLS_99.slots;
+        const { activator: __VLS_thisSlot } = __VLS_134.slots;
         const [{ props }] = __VLS_getSlotParams(__VLS_thisSlot);
-        const __VLS_100 = {}.VBtn;
+        const __VLS_135 = {}.VBtn;
         /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
         // @ts-ignore
-        const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
+        const __VLS_136 = __VLS_asFunctionalComponent(__VLS_135, new __VLS_135({
             ...{ 'onClick': {} },
             ...(props),
             icon: "mdi-delete",
@@ -540,7 +680,7 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
             color: "error",
             loading: (__VLS_ctx.removingId === account._id),
         }));
-        const __VLS_102 = __VLS_101({
+        const __VLS_137 = __VLS_136({
             ...{ 'onClick': {} },
             ...(props),
             icon: "mdi-delete",
@@ -548,20 +688,20 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
             variant: "text",
             color: "error",
             loading: (__VLS_ctx.removingId === account._id),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_101));
-        let __VLS_104;
-        let __VLS_105;
-        let __VLS_106;
-        const __VLS_107 = {
+        }, ...__VLS_functionalComponentArgsRest(__VLS_136));
+        let __VLS_139;
+        let __VLS_140;
+        let __VLS_141;
+        const __VLS_142 = {
             onClick: (...[$event]) => {
                 __VLS_ctx.removeAccount(account._id);
             }
         };
-        var __VLS_103;
+        var __VLS_138;
     }
-    var __VLS_99;
+    var __VLS_134;
 }
-var __VLS_51;
+var __VLS_86;
 /** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['align-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
@@ -570,6 +710,9 @@ var __VLS_51;
 /** @type {__VLS_StyleScopedClasses['mt-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
+/** @type {__VLS_StyleScopedClasses['align-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['pa-0']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-medium-emphasis']} */ ;
 /** @type {__VLS_StyleScopedClasses['pa-4']} */ ;
@@ -578,6 +721,7 @@ var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
+            VncViewer: VncViewer,
             platforms: platforms,
             accounts: accounts,
             connecting: connecting,
@@ -586,6 +730,11 @@ const __VLS_self = (await import('vue')).defineComponent({
             removingId: removingId,
             syncingId: syncingId,
             syncMessage: syncMessage,
+            showVnc: showVnc,
+            connectLocalMode: connectLocalMode,
+            vncWsUrl: vncWsUrl,
+            cancelConnect: cancelConnect,
+            onVncDisconnect: onVncDisconnect,
             connectAccount: connectAccount,
             checkResult: checkResult,
             checkSession: checkSession,

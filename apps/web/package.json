@@ -11,20 +11,21 @@
   },
   "dependencies": {
     "@crosspost/shared": "workspace:*",
+    "@mdi/font": "^7.4.0",
+    "@novnc/novnc": "^1.7.0",
+    "@tanstack/vue-query": "^5.75.0",
+    "axios": "^1.9.0",
+    "pinia": "^3.0.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0",
-    "pinia": "^3.0.0",
-    "vuetify": "^3.8.0",
-    "@mdi/font": "^7.4.0",
-    "@tanstack/vue-query": "^5.75.0",
-    "axios": "^1.9.0"
+    "vuetify": "^3.8.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",
+    "sass-embedded": "^1.89.0",
     "typescript": "^5.8.0",
     "vite": "^6.3.0",
-    "vue-tsc": "^2.2.0",
     "vite-plugin-vuetify": "^2.1.0",
-    "sass-embedded": "^1.89.0"
+    "vue-tsc": "^2.2.0"
   }
 }

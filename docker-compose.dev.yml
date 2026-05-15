@@ -1,0 +1,32 @@
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  browser:
+    build:
+      context: .
+      dockerfile: apps/browser/Dockerfile.dev
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VNC_WS_PORT_MIN=7800
+      - VNC_WS_PORT_MAX=7810
+    depends_on:
+      - redis
+    ports:
+      - "5175:5175"
+      - "7800-7810:7800-7810"
+    volumes:
+      - ./apps/browser/src:/app/apps/browser/src
+
+volumes:
+  mongo-data:

@@ -1,0 +1,49 @@
+FROM node:20-slim
+
+# System deps for VNC + Playwright
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    x11vnc \
+    websockify \
+    # Playwright Chromium deps
+    libnss3 \
+    libatk1.0-0t64 \
+    libatk-bridge2.0-0t64 \
+    libcups2t64 \
+    libdrm2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2t64 \
+    libxshmfence1 \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy workspace root files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy all packages (needed for workspace resolution)
+COPY packages/ ./packages/
+COPY apps/api/ ./apps/api/
+
+# Install deps
+RUN pnpm install --frozen-lockfile
+
+# Install Playwright Chromium
+RUN npx playwright install chromium
+
+# Build shared package first
+RUN pnpm --filter @crosspost/shared build
+
+EXPOSE 5174
+
+# Start API in watch mode
+CMD ["pnpm", "--filter", "@crosspost/api", "start:dev"]

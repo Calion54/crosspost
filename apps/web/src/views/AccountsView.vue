@@ -20,8 +20,10 @@
       </v-menu>
     </div>
 
-    <v-alert v-if="connecting" type="info" class="mb-4">
-      Un navigateur s'est ouvert. Connecte-toi manuellement puis reviens ici.
+    <v-alert v-if="connecting && !showVnc" type="info" class="mb-4">
+      {{ connectLocalMode
+        ? 'Un navigateur s\'est ouvert. Connecte-toi manuellement puis reviens ici.'
+        : 'Demarrage du navigateur distant...' }}
       <v-progress-linear indeterminate class="mt-2" />
     </v-alert>
 
@@ -32,6 +34,24 @@
     <v-alert v-if="syncMessage" type="info" class="mb-4" closable @click:close="syncMessage = ''">
       {{ syncMessage }}
     </v-alert>
+
+    <!-- VNC Dialog -->
+    <v-dialog v-model="showVnc" width="1320" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          Connexion au compte
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" @click="cancelConnect" />
+        </v-card-title>
+        <v-card-text class="pa-0">
+          <VncViewer
+            v-if="vncWsUrl"
+            :url="vncWsUrl"
+            @disconnect="onVncDisconnect"
+          />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
     <v-table>
       <thead>
@@ -127,9 +147,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { Platform } from '@crosspost/shared';
 import apiClient from '@/api/client';
+import VncViewer from '@/components/VncViewer.vue';
 
 const platforms = [
   { label: 'Leboncoin', value: Platform.LEBONCOIN },
@@ -144,8 +165,17 @@ const checkingId = ref<string | null>(null);
 const removingId = ref<string | null>(null);
 const syncingId = ref<string | null>(null);
 const syncMessage = ref('');
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+const vncUrl = ref<string | null>(null);
+const showVnc = ref(false);
+const connectLocalMode = ref(false);
+let eventSource: EventSource | null = null;
 let syncPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const vncWsUrl = computed(() => {
+  if (!vncUrl.value) return null;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}${vncUrl.value}`;
+});
 
 async function fetchAccounts() {
   isLoading.value = true;
@@ -157,45 +187,88 @@ async function fetchAccounts() {
   }
 }
 
-async function pollConnectStatus(sessionId: string) {
-  pollTimer = setInterval(async () => {
+function listenToConnectEvents(sessionId: string) {
+  closeEventSource();
+
+  eventSource = new EventSource(`/api/accounts/connect/${sessionId}/events`);
+
+  eventSource.onmessage = (event) => {
     try {
-      const { data } = await apiClient.get(`/accounts/connect/${sessionId}/status`);
-      if (data.status === 'success') {
-        stopPolling();
+      const session = JSON.parse(event.data);
+
+      if (session.status === 'browser_ready') {
+        if (session.vncUrl) {
+          vncUrl.value = session.vncUrl;
+          showVnc.value = true;
+        } else {
+          connectLocalMode.value = true;
+        }
+      }
+
+      if (session.status === 'success') {
+        closeEventSource();
         connecting.value = false;
-        await fetchAccounts();
-      } else if (data.status === 'error') {
-        stopPolling();
+        showVnc.value = false;
+        vncUrl.value = null;
+        connectLocalMode.value = false;
+        fetchAccounts();
+      } else if (session.status === 'error') {
+        closeEventSource();
         connecting.value = false;
-        connectError.value = data.error || 'La connexion a echoue';
+        showVnc.value = false;
+        vncUrl.value = null;
+        connectLocalMode.value = false;
+        connectError.value = session.error || 'La connexion a echoue';
       }
     } catch {
-      stopPolling();
-      connecting.value = false;
-      connectError.value = 'Erreur lors de la verification du statut';
+      // ignore parse errors
     }
-  }, 2000);
+  };
+
+  eventSource.onerror = () => {
+    closeEventSource();
+    if (connecting.value) {
+      connecting.value = false;
+      showVnc.value = false;
+      vncUrl.value = null;
+      connectError.value = 'Connexion au serveur perdue';
+    }
+  };
 }
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function closeEventSource() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
   }
 }
 
+function cancelConnect() {
+  closeEventSource();
+  connecting.value = false;
+  showVnc.value = false;
+  vncUrl.value = null;
+  connectLocalMode.value = false;
+}
+
+function onVncDisconnect() {
+  // VNC disconnected — the session may still be running,
+  // SSE will handle the final status update
+}
+
 onUnmounted(() => {
-  stopPolling();
+  closeEventSource();
   stopSyncPolling();
 });
 
 async function connectAccount(platform: string) {
   connecting.value = true;
   connectError.value = '';
+  vncUrl.value = null;
+  connectLocalMode.value = false;
   try {
     const { data } = await apiClient.post('/accounts/connect', { platform });
-    pollConnectStatus(data.sessionId);
+    listenToConnectEvents(data.sessionId);
   } catch {
     connecting.value = false;
     connectError.value = 'Impossible de lancer la connexion';
@@ -222,9 +295,11 @@ async function checkSession(id: string) {
 async function reconnect(id: string) {
   connecting.value = true;
   connectError.value = '';
+  vncUrl.value = null;
+  connectLocalMode.value = false;
   try {
     const { data } = await apiClient.post(`/accounts/${id}/reconnect`);
-    pollConnectStatus(data.sessionId);
+    listenToConnectEvents(data.sessionId);
   } catch {
     connecting.value = false;
     connectError.value = 'Impossible de relancer la connexion';

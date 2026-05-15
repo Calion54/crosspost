@@ -6,3 +6,4 @@ export * from './enums/listing-condition.enum';
 export * from './enums/listing-category.enum';
 export * from './enums/listing-color.enum';
 export * from './enums/package-size.enum';
+export * from './jobs/browser-jobs';

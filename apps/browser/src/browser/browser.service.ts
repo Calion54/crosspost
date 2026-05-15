@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
 import { join } from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, rm } from 'fs/promises';
 
 const PROFILES_DIR = join(process.cwd(), 'browser-profiles');
 
@@ -19,8 +19,6 @@ export class BrowserService implements OnModuleDestroy {
     await this.closeBrowser();
   }
 
-  // ─── Legacy API (used by accounts & sync) ────────────────────
-
   async launchBrowser(headless = false): Promise<Browser> {
     if (this.browser?.isConnected()) {
       return this.browser;
@@ -33,6 +31,21 @@ export class BrowserService implements OnModuleDestroy {
       ],
     });
     return this.browser;
+  }
+
+  async launchBrowserOnDisplay(display: number): Promise<Browser> {
+    return chromium.launch({
+      headless: false,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+      ],
+      env: {
+        ...(process.env as Record<string, string>),
+        DISPLAY: `:${display}`,
+      },
+    });
   }
 
   async createContext(
@@ -62,8 +75,6 @@ export class BrowserService implements OnModuleDestroy {
     }
   }
 
-  // ─── Persistent context API (used by publish) ────────────────
-
   async getPersistentContext(
     accountId: string,
     userAgent?: string,
@@ -80,8 +91,6 @@ export class BrowserService implements OnModuleDestroy {
 
     const profileDir = join(PROFILES_DIR, accountId);
     await mkdir(profileDir, { recursive: true });
-
-    this.logger.log(`[browser] Launching persistent context for ${accountId}`);
 
     const context = await chromium.launchPersistentContext(profileDir, {
       headless: false,
@@ -113,5 +122,12 @@ export class BrowserService implements OnModuleDestroy {
       await context.close().catch(() => {});
       this.persistentContexts.delete(accountId);
     }
+  }
+
+  async deletePersistentProfile(accountId: string) {
+    await this.closePersistentContext(accountId);
+    const profileDir = join(PROFILES_DIR, accountId);
+    await rm(profileDir, { recursive: true, force: true });
+    this.logger.log(`Deleted browser profile for ${accountId}`);
   }
 }

@@ -1,0 +1,39 @@
+FROM node:22-slim
+
+# System deps for Playwright + VNC stack
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb x11vnc websockify \
+    # Playwright Chromium deps
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2 libxshmfence1 \
+    fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy workspace root files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy package.json for each workspace package
+COPY packages/shared/package.json packages/shared/
+COPY apps/browser/package.json apps/browser/
+
+# Install deps (ignore-scripts avoids onlyBuiltDependencies issues in fresh env)
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# Copy shared source and build it
+COPY packages/shared/ packages/shared/
+RUN pnpm --filter @crosspost/shared build
+
+# Install Playwright browsers
+RUN pnpm --filter @crosspost/browser exec playwright install chromium
+
+# Browser source is mounted as volume — don't copy it
+# Copy only config files needed for nest CLI
+COPY apps/browser/tsconfig.json apps/browser/nest-cli.json apps/browser/
+
+CMD ["pnpm", "--filter", "@crosspost/browser", "dev"]

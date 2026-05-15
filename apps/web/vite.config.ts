@@ -8,6 +8,14 @@ export default defineConfig({
     vue(),
     vuetify({ autoImport: true }),
   ],
+  build: {
+    target: 'esnext',
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'esnext',
+    },
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -16,6 +24,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // VNC WebSocket goes directly to the browser container, which hosts
+      // websockify internally and handles the upgrade in-process. The API
+      // is not involved — avoiding a Docker NAT loopback that fails from
+      // the long-running API runtime on macOS.
+      '/api/vnc': {
+        target: 'http://localhost:5175',
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: 'http://localhost:5174',
         changeOrigin: true,

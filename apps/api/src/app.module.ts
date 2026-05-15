@@ -3,12 +3,11 @@ import { APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MongooseModule } from '@nestjs/mongoose';
+import { BullModule } from '@nestjs/bullmq';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { LlmModule } from './common/llm/llm.module.js';
 import { EncryptionModule } from './common/crypto/encryption.module.js';
-import { ScrapeDebugModule } from './common/debug/scrape-debug.module.js';
-import { BrowserModule } from './browser/browser.module.js';
 import { ListingsModule } from './listings/listings.module.js';
 import { PublicationsModule } from './publications/publications.module.js';
 import { AccountsModule } from './accounts/accounts.module.js';
@@ -27,10 +26,17 @@ import { AuthGuard } from './auth/auth.guard.js';
         uri: config.get<string>('MONGODB_URI', 'mongodb://localhost:27017/crosspost'),
       }),
     }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get('REDIS_HOST', 'localhost'),
+          port: config.get<number>('REDIS_PORT', 6379),
+        },
+      }),
+    }),
     LlmModule,
     EncryptionModule,
-    ScrapeDebugModule,
-    BrowserModule,
     ListingsModule,
     PublicationsModule,
     AccountsModule,

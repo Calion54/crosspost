@@ -3,10 +3,12 @@
   "private": true,
   "scripts": {
     "dev:api": "pnpm --filter @crosspost/api dev",
+    "dev:browser": "pnpm --filter @crosspost/browser dev",
     "dev:web": "pnpm --filter @crosspost/web dev",
-    "dev": "pnpm run --parallel dev:api dev:web",
-    "build": "pnpm --filter @crosspost/shared build && pnpm run --parallel build:api build:web",
+    "dev": "pnpm run --parallel dev:api dev:browser dev:web",
+    "build": "pnpm --filter @crosspost/shared build && pnpm run --parallel build:api build:browser build:web",
     "build:api": "pnpm --filter @crosspost/api build",
+    "build:browser": "pnpm --filter @crosspost/browser build",
     "build:web": "pnpm --filter @crosspost/web build",
     "lint": "pnpm -r lint"
   },

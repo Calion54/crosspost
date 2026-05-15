@@ -3,6 +3,8 @@ packages:
   - 'packages/*'
 onlyBuiltDependencies:
   - '@nestjs/core'
+  - '@swc/core'
   - esbuild
+  - msgpackr-extract
   - unrs-resolver
   - vue-demi

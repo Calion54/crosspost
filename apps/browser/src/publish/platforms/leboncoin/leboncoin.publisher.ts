@@ -22,11 +22,7 @@ function makeFormCtx(
   ctx: StepContext,
   registry: SelectorRegistryService,
 ): FormContext {
-  return {
-    page: ctx.page,
-    platform: 'leboncoin',
-    registry,
-  };
+  return { page: ctx.page, platform: 'leboncoin', registry };
 }
 
 export class LeboncoinPublisher implements PlatformPublisher {
@@ -106,27 +102,19 @@ export class LeboncoinPublisher implements PlatformPublisher {
 
   get steps(): WorkflowStep[] {
     return [
-      // Page 1: Title → category suggestions appear automatically
       { name: 'fill_title', run: (ctx) => this.fillTitle(ctx) },
-      // Selecting category auto-navigates to photos page
       { name: 'select_category', run: (ctx) => this.selectCategory(ctx) },
-      // Page 2: Photos — upload images then continue
       { name: 'upload_images', run: (ctx) => this.uploadImages(ctx) },
       { name: 'click_continue_photos', run: (ctx) => this.clickContinue(ctx) },
-      // Page 3: "Dites-nous en plus" — Brand, Condition dropdowns
       { name: 'fill_details', run: (ctx) => this.fillDetails(ctx) },
       { name: 'click_continue_details', run: (ctx) => this.clickContinue(ctx) },
-      // Page 4: "Décrivez votre bien" — Title (pre-filled) + Description
       { name: 'fill_body', run: (ctx) => this.fillBody(ctx) },
       { name: 'click_continue_desc', run: (ctx) => this.clickContinue(ctx) },
-      // Page 5: "Quel est votre prix ?"
       { name: 'fill_price', run: (ctx) => this.fillPrice(ctx) },
       { name: 'click_continue_price', run: (ctx) => this.clickContinue(ctx) },
-      // Page 6: "Remise du bien" — Location + shipping/package size
       { name: 'fill_location', run: (ctx) => this.fillLocation(ctx) },
       { name: 'select_package_size', run: (ctx) => this.selectPackageSize(ctx) },
       { name: 'click_continue_location', run: (ctx) => this.clickContinue(ctx) },
-      // Page 7: Review & submit
       { name: 'submit', run: (ctx) => this.submit(ctx) },
     ];
   }
@@ -137,13 +125,10 @@ export class LeboncoinPublisher implements PlatformPublisher {
 
   private async fillTitle(ctx: StepContext) {
     await fillField(this.fctx(ctx), 'title', ctx.listing.title, "Titre de l'annonce");
-    // After typing the title, Leboncoin shows category suggestions — wait for them
     await humanDelay(2000, 3000);
   }
 
   private async selectCategory(ctx: StepContext) {
-    // After typing the title, Leboncoin shows category suggestion radios.
-    // Click the first one — it's the best match.
     const result = await clickButton(this.fctx(ctx), 'categoryRadio', 'Suggestion de catégorie');
     if (result.status === 'success') {
       await humanDelay(1500, 2500);
@@ -159,13 +144,10 @@ export class LeboncoinPublisher implements PlatformPublisher {
         return;
       }
     }
-    // No continue button found — maybe we're already on the right step
   }
 
   private async fillDetails(ctx: StepContext) {
-    // "Dites-nous en plus" page — dynamic fields
     const fctx = this.fctx(ctx);
-
     if (ctx.listing.condition) {
       const conditionLabels: Record<string, string> = {
         new_with_tags: 'Neuf avec étiquette',
@@ -177,7 +159,6 @@ export class LeboncoinPublisher implements PlatformPublisher {
       const searchText = conditionLabels[ctx.listing.condition] || ctx.listing.condition;
       await fillAutocomplete(fctx, 'condition', searchText, 'État du produit');
     }
-
   }
 
   private async fillBody(ctx: StepContext) {
@@ -185,60 +166,36 @@ export class LeboncoinPublisher implements PlatformPublisher {
   }
 
   private async fillPrice(ctx: StepContext) {
-    await fillField(
-      this.fctx(ctx),
-      'price',
-      String(ctx.listing.price),
-      'Prix en euros',
-    );
+    await fillField(this.fctx(ctx), 'price', String(ctx.listing.price), 'Prix en euros');
   }
 
   private async fillLocation(ctx: StepContext) {
     if (!ctx.listing.location) return;
-    await fillAutocomplete(
-      this.fctx(ctx),
-      'location',
-      ctx.listing.location,
-      'Adresse ou ville',
-    );
+    await fillAutocomplete(this.fctx(ctx), 'location', ctx.listing.location, 'Adresse ou ville');
     await waitForPageSettle(ctx.page);
   }
 
   private async uploadImages(ctx: StepContext) {
     if (ctx.imagePaths.length === 0) return;
-    await uploadImages(
-      this.fctx(ctx),
-      'imageInput',
-      ctx.imagePaths,
-      'Input de téléchargement de photos',
-    );
+    await uploadImages(this.fctx(ctx), 'imageInput', ctx.imagePaths, 'Input de téléchargement de photos');
   }
 
   private async selectPackageSize(ctx: StepContext) {
     if (!ctx.listing.packageSize) return;
-
-    const formatMap: Record<string, string> = {
-      S: 'Petit',
-      M: 'Moyen',
-      L: 'Volumineux',
-    };
+    const formatMap: Record<string, string> = { S: 'Petit', M: 'Moyen', L: 'Volumineux' };
     const formatText = formatMap[ctx.listing.packageSize];
     if (!formatText) return;
 
     try {
-      // Open the package size modal via registry
       const editResult = await clickButton(this.fctx(ctx), 'packageSizeEdit', 'Modifier taille colis');
       if (editResult.status !== 'success') return;
       await waitForPageSettle(ctx.page);
 
-      // Step 1: Select format
       const formatResult = await clickInModal(ctx.page, formatText);
       if (formatResult.status !== 'success') return;
-
       await clickInModal(ctx.page, 'Continuer');
       await waitForPageSettle(ctx.page);
 
-      // Step 2: Select weight — first option
       try {
         const modal = ctx.page.locator('[role="dialog"]');
         const weightOption = modal.locator('[data-spark-component="radio-label"]').first();
@@ -246,26 +203,19 @@ export class LeboncoinPublisher implements PlatformPublisher {
           await weightOption.click();
           await humanDelay(500, 800);
         }
-      } catch {
-        // Weight selection optional
-      }
+      } catch {}
 
-      // Step 2 button is "Valider", not "Continuer"
       for (const text of ['Valider', 'Continuer', 'Confirmer']) {
         const result = await clickInModal(ctx.page, text);
         if (result.status === 'success') break;
       }
-    } catch {
-      // Package size selection failed — continue with default
-    }
+    } catch {}
   }
 
   private capturedAdId: string | null = null;
 
   private async submit(ctx: StepContext) {
     const { page } = ctx;
-
-    // Listen for the API response that contains the ad ID before clicking submit
     const responsePromise = page.waitForResponse(
       (resp) => resp.url().includes('/api/') && resp.request().method() === 'POST' && resp.status() < 400,
       { timeout: 30_000 },
@@ -274,20 +224,14 @@ export class LeboncoinPublisher implements PlatformPublisher {
     for (const text of ['Déposer sans booster mon annonce', 'Déposer mon annonce', 'Publier']) {
       const result = await clickText(page, text);
       if (result.status === 'success') {
-        // Try to extract ad ID from the API response
         try {
           const response = await responsePromise;
           if (response) {
             const body = await response.json().catch(() => null);
-            // Leboncoin API typically returns { id, ... } or { ad_id, ... }
             const adId = body?.id || body?.ad_id || body?.adId || body?.list_id;
-            if (adId) {
-              this.capturedAdId = String(adId);
-            }
+            if (adId) this.capturedAdId = String(adId);
           }
-        } catch {
-          // Response capture failed — will fallback in extractResult
-        }
+        } catch {}
         await humanDelay(3000, 5000);
         return;
       }
@@ -296,24 +240,14 @@ export class LeboncoinPublisher implements PlatformPublisher {
   }
 
   async extractResult(page: Page): Promise<PublishResult> {
-    // 1. Use captured API response if available
     if (this.capturedAdId) {
       const adId = this.capturedAdId;
       this.capturedAdId = null;
-      return {
-        externalId: adId,
-        externalUrl: `https://www.leboncoin.fr/ad/${adId}`,
-      };
+      return { externalId: adId, externalUrl: `https://www.leboncoin.fr/ad/${adId}` };
     }
-
-    // 2. Check current URL
     const currentUrl = page.url();
     const adMatch = currentUrl.match(/\/ad\/[^/]+\/(\d+)/);
-    if (adMatch) {
-      return { externalId: adMatch[1], externalUrl: currentUrl };
-    }
-
-    // 3. Fallback
+    if (adMatch) return { externalId: adMatch[1], externalUrl: currentUrl };
     return { externalId: 'unknown', externalUrl: currentUrl };
   }
 }
