@@ -11,3 +11,4 @@ debug-snapshots
 publish-registry
 browser-profiles
 .idea
+.debug

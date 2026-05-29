@@ -9,6 +9,11 @@ export interface LlmMessageParams {
   messages: Anthropic.MessageParam[];
   maxTokens?: number;
   tools?: Anthropic.Tool[];
+  /**
+   * Force le LLM à appeler un tool précis (ou n'importe quel tool). Sans ça,
+   * Claude peut répondre en texte même quand des tools sont fournis.
+   */
+  toolChoice?: Anthropic.MessageCreateParams['tool_choice'];
   model?: string;
 }
 
@@ -36,6 +41,7 @@ export class LlmService {
       system: params.system,
       messages: params.messages,
       tools: params.tools,
+      tool_choice: params.toolChoice,
     });
 
     this.logger.debug(

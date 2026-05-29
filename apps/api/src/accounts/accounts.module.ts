@@ -1,20 +1,24 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { BullModule } from '@nestjs/bullmq';
-import { BROWSER_QUEUE } from '@crosspost/shared';
 import { AccountsController } from './accounts.controller.js';
 import { AccountsService } from './accounts.service.js';
 import { Account, AccountSchema } from './schemas/account.schema.js';
+import { LeboncoinModule } from '../leboncoin/leboncoin.module.js';
+import { VintedModule } from '../vinted/vinted.module.js';
+import { PlatformAuthDispatcher } from './platform-auth.dispatcher.js';
+import { SyncModule } from '../sync/sync.module.js';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Account.name, schema: AccountSchema },
     ]),
-    BullModule.registerQueue({ name: BROWSER_QUEUE }),
+    LeboncoinModule,
+    VintedModule,
+    forwardRef(() => SyncModule),
   ],
   controllers: [AccountsController],
-  providers: [AccountsService],
+  providers: [AccountsService, PlatformAuthDispatcher],
   exports: [AccountsService],
 })
 export class AccountsModule {}

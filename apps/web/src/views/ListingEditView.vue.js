@@ -57,7 +57,6 @@ const form = reactive({
     condition: null,
     color: null,
     packageSize: null,
-    location: '',
     media: [],
 });
 const loading = ref(true);
@@ -75,7 +74,6 @@ onMounted(async () => {
         form.condition = data.condition || null;
         form.color = data.color || null;
         form.packageSize = data.packageSize || null;
-        form.location = data.location || '';
         form.media = data.media || [];
         mediaUrls.value = data.mediaUrls || [];
     }
@@ -135,8 +133,6 @@ async function onSubmit() {
             payload.color = form.color;
         if (form.packageSize)
             payload.packageSize = form.packageSize;
-        if (form.location)
-            payload.location = form.location;
         await apiClient.patch(`/listings/${id}`, payload);
         snackbar.text = 'Annonce mise a jour';
         snackbar.color = 'success';
@@ -478,38 +474,21 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
         ...{ class: "text-subtitle-2 text-medium-emphasis mb-3" },
     });
-    const __VLS_100 = {}.VTextField;
-    /** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
-    // @ts-ignore
-    const __VLS_101 = __VLS_asFunctionalComponent(__VLS_100, new __VLS_100({
-        modelValue: (__VLS_ctx.form.location),
-        label: "Adresse",
-        placeholder: "ex: Paris (75011)",
-        prependInnerIcon: "mdi-map-marker",
-        ...{ class: "mb-2" },
-    }));
-    const __VLS_102 = __VLS_101({
-        modelValue: (__VLS_ctx.form.location),
-        label: "Adresse",
-        placeholder: "ex: Paris (75011)",
-        prependInnerIcon: "mdi-map-marker",
-        ...{ class: "mb-2" },
-    }, ...__VLS_functionalComponentArgsRest(__VLS_101));
     /** @type {[typeof MediaUpload, ]} */ ;
     // @ts-ignore
-    const __VLS_104 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
+    const __VLS_100 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
         modelValue: (__VLS_ctx.form.media),
         mediaUrls: (__VLS_ctx.mediaUrls),
     }));
-    const __VLS_105 = __VLS_104({
+    const __VLS_101 = __VLS_100({
         modelValue: (__VLS_ctx.form.media),
         mediaUrls: (__VLS_ctx.mediaUrls),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_104));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_100));
     var __VLS_99;
-    const __VLS_107 = {}.VBtn;
+    const __VLS_103 = {}.VBtn;
     /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
     // @ts-ignore
-    const __VLS_108 = __VLS_asFunctionalComponent(__VLS_107, new __VLS_107({
+    const __VLS_104 = __VLS_asFunctionalComponent(__VLS_103, new __VLS_103({
         type: "submit",
         color: "primary",
         size: "large",
@@ -517,34 +496,34 @@ else {
         loading: (__VLS_ctx.submitting),
         ...{ class: "mb-4" },
     }));
-    const __VLS_109 = __VLS_108({
+    const __VLS_105 = __VLS_104({
         type: "submit",
         color: "primary",
         size: "large",
         block: true,
         loading: (__VLS_ctx.submitting),
         ...{ class: "mb-4" },
-    }, ...__VLS_functionalComponentArgsRest(__VLS_108));
-    __VLS_110.slots.default;
-    var __VLS_110;
+    }, ...__VLS_functionalComponentArgsRest(__VLS_104));
+    __VLS_106.slots.default;
+    var __VLS_106;
     var __VLS_27;
 }
-const __VLS_111 = {}.VSnackbar;
+const __VLS_107 = {}.VSnackbar;
 /** @type {[typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, ]} */ ;
 // @ts-ignore
-const __VLS_112 = __VLS_asFunctionalComponent(__VLS_111, new __VLS_111({
+const __VLS_108 = __VLS_asFunctionalComponent(__VLS_107, new __VLS_107({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
 }));
-const __VLS_113 = __VLS_112({
+const __VLS_109 = __VLS_108({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
-}, ...__VLS_functionalComponentArgsRest(__VLS_112));
-__VLS_114.slots.default;
+}, ...__VLS_functionalComponentArgsRest(__VLS_108));
+__VLS_110.slots.default;
 (__VLS_ctx.snackbar.text);
-var __VLS_114;
+var __VLS_110;
 /** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['align-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
@@ -565,7 +544,6 @@ var __VLS_114;
 /** @type {__VLS_StyleScopedClasses['text-subtitle-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-medium-emphasis']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-3']} */ ;
-/** @type {__VLS_StyleScopedClasses['mb-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({

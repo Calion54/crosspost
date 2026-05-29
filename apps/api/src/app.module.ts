@@ -16,6 +16,7 @@ import { MediaModule } from './media/media.module.js';
 import { PublishModule } from './publish/publish.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
+import { SettingsModule } from './settings/settings.module.js';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { AuthGuard } from './auth/auth.guard.js';
     MediaModule,
     PublishModule,
     AuthModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [

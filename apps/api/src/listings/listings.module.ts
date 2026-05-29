@@ -8,6 +8,7 @@ import {
   Publication,
   PublicationSchema,
 } from '../publications/schemas/publication.schema.js';
+import { PublicationsModule } from '../publications/publications.module.js';
 import { MediaModule } from '../media/media.module.js';
 
 @Module({
@@ -17,6 +18,7 @@ import { MediaModule } from '../media/media.module.js';
       { name: Publication.name, schema: PublicationSchema },
     ]),
     MediaModule,
+    PublicationsModule,
   ],
   controllers: [ListingsController],
   providers: [ListingsService, AutoFillService],

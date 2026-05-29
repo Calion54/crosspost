@@ -93,14 +93,7 @@
       </v-card>
 
       <v-card class="pa-4 mb-4">
-        <p class="text-subtitle-2 text-medium-emphasis mb-3">Localisation & photos</p>
-        <v-text-field
-          v-model="form.location"
-          label="Adresse"
-          placeholder="ex: Paris (75011)"
-          prepend-inner-icon="mdi-map-marker"
-          class="mb-2"
-        />
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Photos</p>
         <MediaUpload v-model="form.media" />
       </v-card>
 
@@ -194,7 +187,6 @@ const form = reactive({
   condition: null as ListingCondition | null,
   color: null as ListingColor | null,
   packageSize: (localStorage.getItem('listing.packageSize') as PackageSize | null) || null,
-  location: localStorage.getItem('listing.location') || '',
   media: [] as ListingMedia[],
 });
 
@@ -247,11 +239,9 @@ async function onSubmit() {
     if (form.condition) payload.condition = form.condition;
     if (form.color) payload.color = form.color;
     payload.packageSize = form.packageSize;
-    if (form.location) payload.location = form.location;
 
     await apiClient.post('/listings', payload);
 
-    if (form.location) localStorage.setItem('listing.location', form.location);
     if (form.packageSize) localStorage.setItem('listing.packageSize', form.packageSize);
 
     snackbar.text = 'Annonce creee';

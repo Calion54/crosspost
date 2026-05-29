@@ -27,6 +27,14 @@ export class Publication {
   @Prop()
   errorMessage?: string;
 
+  /** Set every time the publication transitions to PUBLISHED (incl. re-publish). */
+  @Prop()
+  publishedAt?: Date;
+
+  /** Number of successful publishes (incremented on every re-publish bump). */
+  @Prop({ required: true, default: 0 })
+  publishCount: number;
+
   @Prop({ type: Object })
   platformPayload?: Record<string, unknown>;
 }

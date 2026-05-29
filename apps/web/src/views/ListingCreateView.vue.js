@@ -60,7 +60,6 @@ const form = reactive({
     condition: null,
     color: null,
     packageSize: localStorage.getItem('listing.packageSize') || null,
-    location: localStorage.getItem('listing.location') || '',
     media: [],
 });
 const autoFilling = ref(false);
@@ -116,11 +115,7 @@ async function onSubmit() {
         if (form.color)
             payload.color = form.color;
         payload.packageSize = form.packageSize;
-        if (form.location)
-            payload.location = form.location;
         await apiClient.post('/listings', payload);
-        if (form.location)
-            localStorage.setItem('listing.location', form.location);
         if (form.packageSize)
             localStorage.setItem('listing.packageSize', form.packageSize);
         snackbar.text = 'Annonce creee';
@@ -459,36 +454,19 @@ __VLS_95.slots.default;
 __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
     ...{ class: "text-subtitle-2 text-medium-emphasis mb-3" },
 });
-const __VLS_96 = {}.VTextField;
-/** @type {[typeof __VLS_components.VTextField, typeof __VLS_components.vTextField, ]} */ ;
-// @ts-ignore
-const __VLS_97 = __VLS_asFunctionalComponent(__VLS_96, new __VLS_96({
-    modelValue: (__VLS_ctx.form.location),
-    label: "Adresse",
-    placeholder: "ex: Paris (75011)",
-    prependInnerIcon: "mdi-map-marker",
-    ...{ class: "mb-2" },
-}));
-const __VLS_98 = __VLS_97({
-    modelValue: (__VLS_ctx.form.location),
-    label: "Adresse",
-    placeholder: "ex: Paris (75011)",
-    prependInnerIcon: "mdi-map-marker",
-    ...{ class: "mb-2" },
-}, ...__VLS_functionalComponentArgsRest(__VLS_97));
 /** @type {[typeof MediaUpload, ]} */ ;
 // @ts-ignore
-const __VLS_100 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
+const __VLS_96 = __VLS_asFunctionalComponent(MediaUpload, new MediaUpload({
     modelValue: (__VLS_ctx.form.media),
 }));
-const __VLS_101 = __VLS_100({
+const __VLS_97 = __VLS_96({
     modelValue: (__VLS_ctx.form.media),
-}, ...__VLS_functionalComponentArgsRest(__VLS_100));
+}, ...__VLS_functionalComponentArgsRest(__VLS_96));
 var __VLS_95;
-const __VLS_103 = {}.VBtn;
+const __VLS_99 = {}.VBtn;
 /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
 // @ts-ignore
-const __VLS_104 = __VLS_asFunctionalComponent(__VLS_103, new __VLS_103({
+const __VLS_100 = __VLS_asFunctionalComponent(__VLS_99, new __VLS_99({
     type: "submit",
     color: "primary",
     size: "large",
@@ -496,33 +474,33 @@ const __VLS_104 = __VLS_asFunctionalComponent(__VLS_103, new __VLS_103({
     loading: (__VLS_ctx.submitting),
     disabled: (!__VLS_ctx.canSubmit),
 }));
-const __VLS_105 = __VLS_104({
+const __VLS_101 = __VLS_100({
     type: "submit",
     color: "primary",
     size: "large",
     block: true,
     loading: (__VLS_ctx.submitting),
     disabled: (!__VLS_ctx.canSubmit),
-}, ...__VLS_functionalComponentArgsRest(__VLS_104));
-__VLS_106.slots.default;
-var __VLS_106;
+}, ...__VLS_functionalComponentArgsRest(__VLS_100));
+__VLS_102.slots.default;
+var __VLS_102;
 var __VLS_23;
-const __VLS_107 = {}.VSnackbar;
+const __VLS_103 = {}.VSnackbar;
 /** @type {[typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, ]} */ ;
 // @ts-ignore
-const __VLS_108 = __VLS_asFunctionalComponent(__VLS_107, new __VLS_107({
+const __VLS_104 = __VLS_asFunctionalComponent(__VLS_103, new __VLS_103({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
 }));
-const __VLS_109 = __VLS_108({
+const __VLS_105 = __VLS_104({
     modelValue: (__VLS_ctx.snackbar.show),
     color: (__VLS_ctx.snackbar.color),
     timeout: "3000",
-}, ...__VLS_functionalComponentArgsRest(__VLS_108));
-__VLS_110.slots.default;
+}, ...__VLS_functionalComponentArgsRest(__VLS_104));
+__VLS_106.slots.default;
 (__VLS_ctx.snackbar.text);
-var __VLS_110;
+var __VLS_106;
 /** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['align-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-4']} */ ;
@@ -543,7 +521,6 @@ var __VLS_110;
 /** @type {__VLS_StyleScopedClasses['text-subtitle-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-medium-emphasis']} */ ;
 /** @type {__VLS_StyleScopedClasses['mb-3']} */ ;
-/** @type {__VLS_StyleScopedClasses['mb-2']} */ ;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {

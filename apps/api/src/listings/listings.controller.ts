@@ -37,7 +37,7 @@ export class ListingsController {
 
   @Get()
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListingQueryDto) {
-    return this.listingsService.findAll(user.userId, query.page, query.limit);
+    return this.listingsService.findAll(user.userId, query);
   }
 
   @Get(':id')

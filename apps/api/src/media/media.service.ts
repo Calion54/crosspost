@@ -4,7 +4,9 @@ import {
   S3Client,
   DeleteObjectCommand,
   GetObjectCommand,
+  PutObjectCommand,
 } from '@aws-sdk/client-s3';
+import { randomUUID } from 'node:crypto';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -96,4 +98,43 @@ export class MediaService {
     );
     return Object.fromEntries(entries);
   }
+
+  /**
+   * Upload binaire direct (server-side) — utilisé par le sync pour réinjecter
+   * les images des plateformes dans notre S3. Côté client, on utilise plutôt
+   * `createPresignedUpload()` pour que le browser pousse directement vers S3.
+   */
+  async uploadBinary(
+    userId: string,
+    data: Buffer,
+    contentType: string,
+  ): Promise<{ key: string; contentType: string }> {
+    const ext = mimeToExtension(contentType);
+    const mediaId = randomUUID();
+    const key = `${userId}/listings/${mediaId}.${ext}`;
+
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: data,
+        ContentType: contentType,
+      }),
+    );
+    this.logger.debug(`Uploaded binary: ${key} (${data.length} bytes)`);
+
+    return { key, contentType };
+  }
+}
+
+function mimeToExtension(contentType: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/avif': 'avif',
+  };
+  return map[contentType.toLowerCase().split(';')[0].trim()] ?? 'bin';
 }

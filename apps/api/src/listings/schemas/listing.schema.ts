@@ -29,19 +29,16 @@ export class Listing {
   price: number;
 
   @Prop({ type: String, enum: Object.values(ListingCategory) })
-  category?: ListingCategory;
+  category?: ListingCategory | null;
 
   @Prop({ type: String, enum: Object.values(ListingCondition) })
-  condition?: ListingCondition;
+  condition?: ListingCondition | null;
 
   @Prop({ type: String, enum: Object.values(ListingColor) })
-  color?: ListingColor;
+  color?: ListingColor | null;
 
   @Prop({ type: String, required: true, enum: Object.values(PackageSize) })
   packageSize: PackageSize;
-
-  @Prop()
-  location?: string;
 
   @Prop({ type: [{ key: String, contentType: String }], default: [] })
   media: ListingMedia[];

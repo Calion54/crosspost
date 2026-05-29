@@ -1,26 +1,37 @@
-import {
-  Controller,
-  Post,
-  Get,
-  Param,
-  NotFoundException,
-} from '@nestjs/common';
+import { Controller, Param, Post, Sse } from '@nestjs/common';
+import type { Observable } from 'rxjs';
 import { SyncService } from './sync.service.js';
+import { CurrentUser, type AuthUser } from '../auth/current-user.decorator.js';
+
+interface MessageEvent {
+  data: string;
+}
 
 @Controller('sync')
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
+  /** Déclenche manuellement un sync depuis le front. Retourne le jobId. */
   @Post(':accountId')
-  startSync(@Param('accountId') accountId: string) {
-    const sessionId = this.syncService.startSync(accountId);
-    return { sessionId };
+  async startSync(
+    @CurrentUser() user: AuthUser,
+    @Param('accountId') accountId: string,
+  ) {
+    const jobId = await this.syncService.enqueueSync(
+      accountId,
+      user.userId,
+      'manual',
+    );
+    return { jobId };
   }
 
-  @Get(':sessionId/status')
-  getSyncStatus(@Param('sessionId') sessionId: string) {
-    const session = this.syncService.getSyncStatus(sessionId);
-    if (!session) throw new NotFoundException('Sync session not found');
-    return session;
+  /**
+   * Stream SSE de tous les events de sync de l'utilisateur courant.
+   * Le front ouvre une seule connexion EventSource et reçoit en push :
+   *   { type: 'queued' | 'started' | 'completed' | 'failed', accountId, ... }
+   */
+  @Sse('events')
+  events(@CurrentUser() user: AuthUser): Observable<MessageEvent> {
+    return this.syncService.streamForUser(user.userId);
   }
 }

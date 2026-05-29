@@ -12,7 +12,6 @@
   "dependencies": {
     "@crosspost/shared": "workspace:*",
     "@mdi/font": "^7.4.0",
-    "@novnc/novnc": "^1.7.0",
     "@tanstack/vue-query": "^5.75.0",
     "axios": "^1.9.0",
     "pinia": "^3.0.0",

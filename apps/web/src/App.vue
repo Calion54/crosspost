@@ -22,6 +22,11 @@
           title="Comptes"
           to="/accounts"
         />
+        <v-list-item
+          prepend-icon="mdi-cog"
+          title="Paramètres"
+          to="/settings"
+        />
       </v-list>
     </v-navigation-drawer>
 

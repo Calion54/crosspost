@@ -91,14 +91,7 @@
       </v-card>
 
       <v-card class="pa-4 mb-4">
-        <p class="text-subtitle-2 text-medium-emphasis mb-3">Localisation & photos</p>
-        <v-text-field
-          v-model="form.location"
-          label="Adresse"
-          placeholder="ex: Paris (75011)"
-          prepend-inner-icon="mdi-map-marker"
-          class="mb-2"
-        />
+        <p class="text-subtitle-2 text-medium-emphasis mb-3">Photos</p>
         <MediaUpload v-model="form.media" :media-urls="mediaUrls" />
       </v-card>
 
@@ -187,7 +180,6 @@ const form = reactive({
   condition: null as ListingCondition | null,
   color: null as ListingColor | null,
   packageSize: null as PackageSize | null,
-  location: '',
   media: [] as ListingMedia[],
 });
 
@@ -207,7 +199,6 @@ onMounted(async () => {
     form.condition = data.condition || null;
     form.color = data.color || null;
     form.packageSize = data.packageSize || null;
-    form.location = data.location || '';
     form.media = data.media || [];
     mediaUrls.value = data.mediaUrls || [];
   } catch {
@@ -258,7 +249,6 @@ async function onSubmit() {
     if (form.condition) payload.condition = form.condition;
     if (form.color) payload.color = form.color;
     if (form.packageSize) payload.packageSize = form.packageSize;
-    if (form.location) payload.location = form.location;
 
     await apiClient.patch(`/listings/${id}`, payload);
 
