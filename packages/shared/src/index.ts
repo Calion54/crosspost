@@ -10,3 +10,4 @@ export * from './enums/listing-color.enum';
 export * from './enums/package-size.enum';
 export * from './accounts/credentials';
 export * from './accounts/connect.dto';
+export * from './errors/account-needs-reconnect';

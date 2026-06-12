@@ -35,8 +35,6 @@
       <v-select
         v-model="selectedPlatforms"
         :items="PLATFORM_OPTIONS"
-        item-title="label"
-        item-value="value"
         density="compact"
         variant="outlined"
         hide-details
@@ -62,13 +60,20 @@
         label="Comptes"
         style="min-width: 280px; max-width: 460px"
       />
-      <v-switch
-        v-model="unpublishedOnly"
+      <v-btn-toggle
+        v-model="statusFilter"
         density="compact"
-        hide-details
         color="primary"
-        label="Non publiées uniquement"
-      />
+        mandatory
+        variant="outlined"
+      >
+        <v-btn :value="ListingStatusFilter.ALL" size="small">Toutes</v-btn>
+        <v-btn :value="ListingStatusFilter.ACTIVE" size="small">Actives</v-btn>
+        <v-btn :value="ListingStatusFilter.SOLD" size="small">Vendues</v-btn>
+        <v-btn :value="ListingStatusFilter.UNPUBLISHED" size="small">
+          Non publiées
+        </v-btn>
+      </v-btn-toggle>
       <v-spacer />
       <v-btn
         v-if="hasActiveFilters"
@@ -115,7 +120,20 @@
               <v-icon color="grey" size="24">mdi-image-off</v-icon>
             </div>
           </td>
-          <td>{{ listing.title }}</td>
+          <td>
+            <div class="d-flex align-center ga-2">
+              <span>{{ listing.title }}</span>
+              <v-chip
+                v-if="listing.sold"
+                size="x-small"
+                color="success"
+                variant="flat"
+                prepend-icon="mdi-cash-check"
+              >
+                Vendue
+              </v-chip>
+            </div>
+          </td>
           <td>{{ listing.price }} &euro;</td>
           <td>
             <div class="d-flex ga-2 align-center flex-wrap">
@@ -130,11 +148,12 @@
                     :href="entry.url || undefined"
                     :target="entry.url ? '_blank' : undefined"
                     class="d-inline-block"
-                    :style="{ opacity: entry.published ? 1 : 0.35 }"
+                    :style="{ opacity: entry.state === 'none' ? 0.35 : 1 }"
                   >
                     <v-badge
-                      :color="entry.published ? 'success' : 'grey'"
-                      dot
+                      :color="ENTRY_BADGE_COLOR[entry.state]"
+                      :icon="entry.state === 'sold' ? 'mdi-currency-eur' : undefined"
+                      :dot="entry.state !== 'sold'"
                       location="bottom end"
                       offset-x="2"
                       offset-y="2"
@@ -190,7 +209,12 @@
     </v-table>
 
     <div v-if="totalPages > 1" class="d-flex justify-center mt-4">
-      <v-pagination v-model="page" :length="totalPages" rounded />
+      <v-pagination
+        v-model="page"
+        :length="totalPages"
+        :total-visible="7"
+        rounded
+      />
     </div>
 
     <!-- Publish modal — select accounts with checkboxes -->
@@ -207,11 +231,19 @@
                 v-for="acc in publishModal.accounts"
                 :key="acc._id"
                 :value="acc._id"
-                :disabled="acc.alreadyPublished"
+                :disabled="acc.alreadyPublished || acc.needsReconnect"
               >
                 <template #prepend="{ isActive }">
                   <v-list-item-action start>
-                    <v-checkbox-btn :model-value="isActive" :disabled="acc.alreadyPublished" />
+                    <!-- Case purement visuelle : on laisse le clic traverser
+                         vers la v-list-item (sinon la checkbox capture le clic
+                         et la sélection ne se met pas à jour). -->
+                    <v-checkbox-btn
+                      :model-value="isActive"
+                      :disabled="acc.alreadyPublished || acc.needsReconnect"
+                      tabindex="-1"
+                      style="pointer-events: none"
+                    />
                   </v-list-item-action>
                   <img
                     :src="platformImage(acc.platform)"
@@ -225,7 +257,15 @@
                 <v-list-item-subtitle>{{ acc.email }}</v-list-item-subtitle>
                 <template #append>
                   <v-chip
-                    v-if="acc.alreadyPublished"
+                    v-if="acc.needsReconnect"
+                    size="x-small"
+                    color="warning"
+                    variant="tonal"
+                  >
+                    Reconnexion requise
+                  </v-chip>
+                  <v-chip
+                    v-else-if="acc.alreadyPublished"
                     size="x-small"
                     color="success"
                     variant="tonal"
@@ -235,32 +275,6 @@
                 </template>
               </v-list-item>
             </v-list>
-
-            <!-- Progress per account -->
-            <div v-if="Object.keys(publishSessions).length" class="mt-2">
-              <div
-                v-for="session in Object.values(publishSessions)"
-                :key="session.accountId"
-                class="d-flex align-center mb-2"
-              >
-                <img
-                  :src="platformImage(session.platform)"
-                  width="20"
-                  height="20"
-                  class="rounded mr-2"
-                />
-                <v-progress-circular
-                  v-if="session.status === 'publishing'"
-                  indeterminate
-                  size="16"
-                  width="2"
-                  class="mr-2"
-                />
-                <v-icon v-else-if="session.status === 'success'" color="success" size="16" class="mr-2">mdi-check-circle</v-icon>
-                <v-icon v-else-if="session.status === 'error'" color="error" size="16" class="mr-2">mdi-alert-circle</v-icon>
-                <span class="text-body-2">{{ session.stepLabel }}</span>
-              </div>
-            </div>
           </template>
           <p v-else class="text-medium-emphasis text-center pa-4">
             Aucun compte connecte. <router-link to="/accounts">Ajouter un compte</router-link>
@@ -272,8 +286,7 @@
           <v-btn
             v-if="publishModal.accounts.length"
             color="primary"
-            :disabled="!publishModal.selected.length || isPublishing"
-            :loading="isPublishing"
+            :disabled="!publishModal.selected.length"
             @click="onPublish"
           >
             Publier ({{ publishModal.selected.length }})
@@ -304,9 +317,15 @@
               >
                 <template #prepend="{ isActive }">
                   <v-list-item-action start>
+                    <!-- Case purement visuelle : on laisse le clic traverser
+                         vers la v-list-item (sinon la checkbox capture le clic
+                         et la sélection ne se met pas à jour → on supprime des
+                         plateformes non sélectionnées). -->
                     <v-checkbox-btn
                       :model-value="isActive"
                       :disabled="deleteModal.crosspost"
+                      tabindex="-1"
+                      style="pointer-events: none"
                     />
                   </v-list-item-action>
                   <img
@@ -361,9 +380,11 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   DEFAULT_LISTING_SORT,
+  ListingStatusFilter,
   Platform,
   PublicationStatus,
   listingSortSchema,
+  listingStatusFilterSchema,
   type AccountResponse,
   type ListingResponse,
   type ListingSort,
@@ -371,27 +392,29 @@ import {
   type PublicationResponse,
 } from '@crosspost/shared';
 import apiClient from '@/api/client';
-import leboncoinIcon from '@/assets/leboncoin.png';
-import vintedIcon from '@/assets/vinted.png';
+import { useAccounts } from '@/composables/accounts';
+import {
+  PLATFORM_OPTIONS,
+  platformImage,
+  platformLabel,
+} from '@/utils/platform';
 
 const ALL_PLATFORMS: Platform[] = [Platform.LEBONCOIN, Platform.VINTED];
 const PER_PAGE = 20;
 
 const SORT_OPTIONS: { value: ListingSort; label: string }[] = [
-  { value: 'createdAt:desc', label: 'Création — récent d\'abord' },
-  { value: 'createdAt:asc', label: 'Création — ancien d\'abord' },
-  { value: 'publishedAt:asc', label: 'Publication — ancien d\'abord' },
-  { value: 'publishedAt:desc', label: 'Publication — récent d\'abord' },
-];
-
-const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
-  { value: Platform.LEBONCOIN, label: 'Leboncoin' },
-  { value: Platform.VINTED, label: 'Vinted' },
+  { value: 'createdAt:desc', label: 'Récent d\'abord' },
+  { value: 'createdAt:asc', label: 'Ancien d\'abord' },
 ];
 
 function parseSort(value: unknown): ListingSort {
   const parsed = listingSortSchema.safeParse(value);
   return parsed.success ? parsed.data : DEFAULT_LISTING_SORT;
+}
+
+function parseStatusFilter(value: unknown): ListingStatusFilter {
+  const parsed = listingStatusFilterSchema.safeParse(value);
+  return parsed.success ? parsed.data : ListingStatusFilter.ALL;
 }
 
 function parsePlatforms(value: unknown): Platform[] {
@@ -414,8 +437,9 @@ const initialSearch =
   typeof route.query.q === 'string' ? route.query.q : '';
 const initialSort = parseSort(route.query.sort);
 
+const { accounts, fetchAccounts } = useAccounts();
+
 const listings = ref<ListingResponse[]>([]);
-const accounts = ref<AccountResponse[]>([]);
 const total = ref(0);
 const page = ref(Number.isFinite(initialPage) && initialPage >= 1 ? initialPage : 1);
 const search = ref(initialSearch);
@@ -425,7 +449,9 @@ const selectedPlatforms = ref<Platform[]>(parsePlatforms(route.query.platforms))
 const selectedAccountIds = ref<string[]>(
   parseStringArray(route.query.accountIds),
 );
-const unpublishedOnly = ref<boolean>(route.query.unpublishedOnly === 'true');
+const statusFilter = ref<ListingStatusFilter>(
+  parseStatusFilter(route.query.statusFilter),
+);
 
 const accountOptions = computed(() =>
   accounts.value.map((a) => ({
@@ -438,13 +464,13 @@ const hasActiveFilters = computed(
   () =>
     selectedPlatforms.value.length > 0 ||
     selectedAccountIds.value.length > 0 ||
-    unpublishedOnly.value,
+    statusFilter.value !== ListingStatusFilter.ALL,
 );
 
 function clearFilters() {
   selectedPlatforms.value = [];
   selectedAccountIds.value = [];
-  unpublishedOnly.value = false;
+  statusFilter.value = ListingStatusFilter.ALL;
 }
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 const snackbar = reactive({ show: false, text: '', color: 'success' });
@@ -467,18 +493,7 @@ const publishModal = reactive<PublishModalState>({
   selected: [],
 });
 
-interface PublishSessionState {
-  accountId: string;
-  platform: Platform;
-  status: 'publishing' | 'success' | 'error';
-  stepLabel: string;
-}
-
-const publishSessions = reactive<Record<string, PublishSessionState>>({});
-
-const isPublishing = computed(() =>
-  Object.values(publishSessions).some((s) => s.status === 'publishing'),
-);
+let publishEventSource: EventSource | null = null;
 
 interface DeleteModalState {
   show: boolean;
@@ -504,51 +519,72 @@ const canConfirmDelete = computed(
 
 const totalPages = computed(() => Math.ceil(total.value / PER_PAGE));
 
-const PLATFORM_IMAGES: Record<Platform, string> = {
-  [Platform.LEBONCOIN]: leboncoinIcon,
-  [Platform.VINTED]: vintedIcon,
-};
-
-function platformImage(platform: Platform): string {
-  return PLATFORM_IMAGES[platform] || '';
-}
-
-function platformLabel(platform: Platform): string {
-  if (platform === Platform.LEBONCOIN) return 'Leboncoin';
-  if (platform === Platform.VINTED) return 'Vinted';
-  return platform;
-}
+type PlatformEntryState = 'none' | 'pending' | 'published' | 'sold';
 
 interface PlatformEntry {
   key: string;
   platform: Platform;
-  published: boolean;
+  state: PlatformEntryState;
   email: string | null;
   url: string | null;
   tooltip: string;
+}
+
+/** Publication "visible" sur une pastille : en ligne ou vendue. */
+function isLive(pub: PublicationResponse): boolean {
+  return (
+    pub.status === PublicationStatus.PUBLISHED ||
+    pub.status === PublicationStatus.SOLD
+  );
 }
 
 function isPublished(pub: PublicationResponse): boolean {
   return pub.status === PublicationStatus.PUBLISHED;
 }
 
+const ENTRY_BADGE_COLOR: Record<PlatformEntryState, string> = {
+  none: 'grey',
+  pending: 'blue',
+  published: 'success',
+  sold: 'amber-darken-2',
+};
+
 function getPlatformEntries(listing: ListingResponse): PlatformEntry[] {
   const entries: PlatformEntry[] = [];
-  const publishedByPlatform = new Map<Platform, PublicationResponse[]>();
+  const liveByPlatform = new Map<Platform, PublicationResponse[]>();
+  const pendingByPlatform = new Map<Platform, PublicationResponse[]>();
   for (const pub of listing.publications) {
-    if (!isPublished(pub)) continue;
-    const arr = publishedByPlatform.get(pub.platform) ?? [];
-    arr.push(pub);
-    publishedByPlatform.set(pub.platform, arr);
+    if (isLive(pub)) {
+      const arr = liveByPlatform.get(pub.platform) ?? [];
+      arr.push(pub);
+      liveByPlatform.set(pub.platform, arr);
+    } else if (pub.status === PublicationStatus.PENDING) {
+      const arr = pendingByPlatform.get(pub.platform) ?? [];
+      arr.push(pub);
+      pendingByPlatform.set(pub.platform, arr);
+    }
   }
 
   for (const platform of ALL_PLATFORMS) {
-    const pubs = publishedByPlatform.get(platform) ?? [];
+    const pubs = liveByPlatform.get(platform) ?? [];
     if (!pubs.length) {
+      // Aucune annonce en ligne : on signale une publication en cours si elle
+      // existe (job BullMQ PENDING), sinon "Non publiée".
+      if ((pendingByPlatform.get(platform) ?? []).length) {
+        entries.push({
+          key: `${listing._id}:${platform}:pending`,
+          platform,
+          state: 'pending',
+          email: null,
+          url: null,
+          tooltip: `${platformLabel(platform)} — Publication en cours…`,
+        });
+        continue;
+      }
       entries.push({
         key: `${listing._id}:${platform}:empty`,
         platform,
-        published: false,
+        state: 'none',
         email: null,
         url: null,
         tooltip: `${platformLabel(platform)} — Non publiée`,
@@ -557,13 +593,14 @@ function getPlatformEntries(listing: ListingResponse): PlatformEntry[] {
     }
     for (const pub of pubs) {
       const email = pub.accountId.email;
+      const sold = pub.status === PublicationStatus.SOLD;
       entries.push({
         key: `${listing._id}:${platform}:${pub.accountId._id}`,
         platform,
-        published: true,
+        state: sold ? 'sold' : 'published',
         email,
         url: pub.externalUrl ?? null,
-        tooltip: `${platformLabel(platform)} · ${email} — Publiée`,
+        tooltip: `${platformLabel(platform)} · ${email} — ${sold ? 'Vendue' : 'Publiée'}`,
       });
     }
   }
@@ -571,59 +608,101 @@ function getPlatformEntries(listing: ListingResponse): PlatformEntry[] {
 }
 
 function openPublishModal(listing: ListingResponse) {
-  const publishedAccountIds = new Set(
-    listing.publications.filter(isPublished).map((p) => p.accountId._id),
+  // Déjà publié = par PLATEFORME, pas par compte : si l'annonce est déjà en
+  // ligne sur Vinted (ou LBC), on bloque tous les comptes de cette plateforme,
+  // même un autre compte. Une annonce ne se publie qu'une fois par plateforme.
+  const publishedPlatforms = new Set(
+    listing.publications.filter(isPublished).map((p) => p.platform),
   );
   publishModal.listing = listing;
   publishModal.accounts = accounts.value
-    .filter((a) => a.isConnected)
-    .map((a) => ({ ...a, alreadyPublished: publishedAccountIds.has(a._id) }));
+    .filter((a) => a.isConnected || a.needsReconnect)
+    .map((a) => ({
+      ...a,
+      alreadyPublished: publishedPlatforms.has(a.platform),
+    }));
   publishModal.selected = publishModal.accounts
-    .filter((a) => !a.alreadyPublished)
+    .filter((a) => !a.alreadyPublished && !a.needsReconnect)
     .map((a) => a._id);
-  for (const key of Object.keys(publishSessions)) delete publishSessions[key];
   publishModal.show = true;
 }
 
-async function onPublish() {
+function onPublish() {
   if (!publishModal.listing) return;
   const listingId = publishModal.listing._id;
-  const selectedAccounts = publishModal.accounts.filter((a) =>
-    publishModal.selected.includes(a._id),
-  );
+  const accountIds = [...publishModal.selected];
 
-  // Publish synchrone (Étape 4) — ~10-30s par compte. Étape 5 passera en BullMQ + SSE.
-  // On lance en parallèle (Promise.all) mais chaque compte attend sa réponse.
-  await Promise.all(
-    selectedAccounts.map(async (acc) => {
-      publishSessions[acc._id] = {
-        accountId: acc._id,
-        platform: acc.platform,
-        status: 'publishing',
-        stepLabel: 'Publication en cours…',
-      };
-      try {
-        const { data } = await apiClient.post<{
-          externalId: string;
-          externalUrl: string;
-        }>('/publish', { listingId, accountId: acc._id });
-        publishSessions[acc._id].status = 'success';
-        publishSessions[acc._id].stepLabel = `Publiée → ${data.externalUrl}`;
-      } catch (err: any) {
-        publishSessions[acc._id].status = 'error';
-        publishSessions[acc._id].stepLabel =
-          err?.response?.data?.message ?? err?.message ?? 'Erreur';
-      }
-    }),
-  );
-  await fetchData();
+  // Full async : on ferme la modale immédiatement et on enqueue en arrière-plan.
+  // Le badge "Publication en cours" (PENDING) puis le flux SSE prennent le relais
+  // pour faire passer l'annonce en ligne sans bloquer l'UI.
+  closePublishModal();
+
+  void (async () => {
+    await Promise.all(
+      accountIds.map((accountId) =>
+        apiClient
+          .post('/publish', { listingId, accountId })
+          .catch((err: any) => {
+            const msg =
+              err?.response?.data?.message ?? err?.message ?? 'Erreur';
+            snackbar.text = `Échec de la mise en file : ${msg}`;
+            snackbar.color = 'error';
+            snackbar.show = true;
+          }),
+      ),
+    );
+    // Affiche tout de suite l'état PENDING.
+    await Promise.all([fetchListings(), fetchAccounts()]);
+  })();
+}
+
+// ─── Flux SSE des events de publication ──────────────────────────────────────
+
+interface PublishEvent {
+  type: 'queued' | 'started' | 'completed' | 'failed';
+  accountId: string;
+  listingId: string;
+  platform: Platform;
+  publicationId: string;
+  result?: { externalId: string; externalUrl: string };
+  error?: string;
+}
+
+function openPublishStream() {
+  closePublishStream();
+  // Cookies de session envoyés automatiquement (withCredentials).
+  publishEventSource = new EventSource('/api/publish/events', {
+    withCredentials: true,
+  });
+  publishEventSource.onmessage = (e) => handlePublishEvent(JSON.parse(e.data));
+  publishEventSource.onerror = () => {
+    // Reconnect automatique géré par EventSource ; on log juste.
+    console.warn('[publish] SSE connection lost, attempting reconnect');
+  };
+}
+
+function closePublishStream() {
+  if (publishEventSource) {
+    publishEventSource.close();
+    publishEventSource = null;
+  }
+}
+
+function handlePublishEvent(event: PublishEvent) {
+  // Full async : on ne gère pas d'UI de progression. À la fin d'un job
+  // (succès ou échec), on rafraîchit pour que la pastille passe de "en cours"
+  // à "en ligne" (ou disparaisse en cas d'échec). On verra plus tard pour un
+  // historique / des toasts détaillés.
+  if (event.type === 'completed' || event.type === 'failed') {
+    void Promise.all([fetchListings(), fetchAccounts()]);
+  }
 }
 
 function closePublishModal() {
   publishModal.show = false;
 }
 
-async function fetchData() {
+async function fetchListings() {
   const params: Record<string, unknown> = {
     page: page.value,
     limit: PER_PAGE,
@@ -633,33 +712,31 @@ async function fetchData() {
   if (q) params.q = q;
   if (selectedPlatforms.value.length) params.platforms = selectedPlatforms.value;
   if (selectedAccountIds.value.length) params.accountIds = selectedAccountIds.value;
-  if (unpublishedOnly.value) params.unpublishedOnly = true;
-  const [listingsRes, accountsRes] = await Promise.all([
-    apiClient.get<PaginatedListingsResponse>('/listings', { params }),
-    apiClient.get<AccountResponse[]>('/accounts'),
-  ]);
-  listings.value = listingsRes.data.items;
-  total.value = listingsRes.data.total;
-  accounts.value = accountsRes.data;
+  if (statusFilter.value !== ListingStatusFilter.ALL) {
+    params.statusFilter = statusFilter.value;
+  }
+  const { data } = await apiClient.get<PaginatedListingsResponse>('/listings', { params });
+  listings.value = data.items;
+  total.value = data.total;
 }
 
-watch(page, fetchData);
+watch(page, fetchListings);
 
 watch(sort, () => {
   if (page.value !== 1) {
     page.value = 1;
   } else {
-    fetchData();
+    fetchListings();
   }
 });
 
 watch(
-  [selectedPlatforms, selectedAccountIds, unpublishedOnly],
+  [selectedPlatforms, selectedAccountIds, statusFilter],
   () => {
     if (page.value !== 1) {
       page.value = 1;
     } else {
-      fetchData();
+      fetchListings();
     }
   },
   { deep: true },
@@ -672,7 +749,7 @@ watch(search, (val) => {
     if (page.value !== 1) {
       page.value = 1;
     } else {
-      fetchData();
+      fetchListings();
     }
   }, 300);
 });
@@ -684,22 +761,22 @@ function queryEqualsArray(a: unknown, b: string[]): boolean {
 
 // Persist page + filters in URL (back/forward restores the view)
 watch(
-  [page, debouncedSearch, sort, selectedPlatforms, selectedAccountIds, unpublishedOnly],
-  ([p, q, s, plats, accs, unpub]) => {
+  [page, debouncedSearch, sort, selectedPlatforms, selectedAccountIds, statusFilter],
+  ([p, q, s, plats, accs, status]) => {
     const next: Record<string, string | string[]> = {};
     if (p > 1) next.page = String(p);
     if (q.trim()) next.q = q.trim();
     if (s !== DEFAULT_LISTING_SORT) next.sort = s;
     if (plats.length) next.platforms = [...plats];
     if (accs.length) next.accountIds = [...accs];
-    if (unpub) next.unpublishedOnly = 'true';
+    if (status !== ListingStatusFilter.ALL) next.statusFilter = status;
 
     const current = route.query;
     const same =
       String(current.page ?? '') === String(next.page ?? '') &&
       String(current.q ?? '') === String(next.q ?? '') &&
       String(current.sort ?? '') === String(next.sort ?? '') &&
-      String(current.unpublishedOnly ?? '') === String(next.unpublishedOnly ?? '') &&
+      String(current.statusFilter ?? '') === String(next.statusFilter ?? '') &&
       queryEqualsArray(current.platforms, plats) &&
       queryEqualsArray(current.accountIds, accs);
     if (same) return;
@@ -718,7 +795,7 @@ watch(
     const newSort = parseSort(query.sort);
     const newPlatforms = parsePlatforms(query.platforms);
     const newAccountIds = parseStringArray(query.accountIds);
-    const newUnpublishedOnly = query.unpublishedOnly === 'true';
+    const newStatusFilter = parseStatusFilter(query.statusFilter);
 
     let needsFetch = false;
     if (newPage !== page.value) page.value = newPage;
@@ -739,11 +816,11 @@ watch(
       selectedAccountIds.value = newAccountIds;
       return;
     }
-    if (newUnpublishedOnly !== unpublishedOnly.value) {
-      unpublishedOnly.value = newUnpublishedOnly;
+    if (newStatusFilter !== statusFilter.value) {
+      statusFilter.value = newStatusFilter;
       return;
     }
-    if (needsFetch) fetchData();
+    if (needsFetch) fetchListings();
   },
 );
 
@@ -839,7 +916,7 @@ async function onConfirmDelete() {
     snackbar.color = allOk ? 'success' : 'warning';
     snackbar.show = true;
     closeDeleteModal();
-    await fetchData();
+    await fetchListings();
   } catch (err: any) {
     snackbar.text = err?.response?.data?.message ?? 'Suppression échouée';
     snackbar.color = 'error';
@@ -849,9 +926,10 @@ async function onConfirmDelete() {
   }
 }
 
-onMounted(fetchData);
-onUnmounted(() => {
-  // rien à nettoyer (la publication est synchrone via await)
+onMounted(() => {
+  void fetchListings();
+  openPublishStream();
 });
+onUnmounted(closePublishStream);
 </script>
 

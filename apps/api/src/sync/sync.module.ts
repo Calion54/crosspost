@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
+import { BullBoardModule } from '@bull-board/nestjs';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { SyncController } from './sync.controller.js';
 import { SyncService } from './sync.service.js';
 import { SyncProcessor } from './sync.processor.js';
@@ -20,6 +22,10 @@ import { VintedModule } from '../vinted/vinted.module.js';
       { name: Account.name, schema: AccountSchema },
     ]),
     BullModule.registerQueue({ name: SYNC_QUEUE }),
+    BullBoardModule.forFeature({
+      name: SYNC_QUEUE,
+      adapter: BullMQAdapter,
+    }),
     LeboncoinModule,
     VintedModule,
   ],

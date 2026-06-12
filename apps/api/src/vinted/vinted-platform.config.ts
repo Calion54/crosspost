@@ -3,8 +3,14 @@ export const VINTED_API_HOST = 'https://www.vinted.fr';
 
 export const VINTED_HOME_URL = `${VINTED_WEB_HOST}/`;
 export const VINTED_OAUTH_URL = `${VINTED_WEB_HOST}/web/api/auth/oauth`;
-/** Refresh des tokens via cookie refresh_token_web. */
-export const VINTED_TOKEN_REFRESH_URL = `${VINTED_WEB_HOST}/web/api/auth/token_refresh`;
+/**
+ * Refresh des tokens via cookie refresh_token_web. POST sans body, réponse
+ * sans corps : Vinted renvoie les nouveaux `access_token_web` (et parfois
+ * `refresh_token_web`/`_vinted_fr_session`) via Set-Cookie.
+ */
+export const VINTED_TOKEN_REFRESH_URL = `${VINTED_WEB_HOST}/web/api/auth/refresh`;
+export const VINTED_MEMBER_URL = (userId: string) =>
+  `${VINTED_WEB_HOST}/member/${userId}`;
 /** Liste des annonces d'un membre (wardrobe). `{userId}` = sub du JWT. */
 export const VINTED_WARDROBE_ITEMS_URL = (userId: string) =>
   `${VINTED_API_HOST}/api/v2/wardrobe/${userId}/items`;

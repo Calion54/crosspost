@@ -57,6 +57,15 @@ export class AccountsService {
   }
 
   /**
+   * Récupère le document Account complet (credentials inclus) par id, sans
+   * scope user. Réservé aux contextes internes (publish/sync workers) qui ont
+   * besoin du document hydraté pour appeler les plateformes — pas exposé au front.
+   */
+  getById(id: string): Promise<AccountDocument | null> {
+    return this.accountModel.findById(new Types.ObjectId(id)).exec();
+  }
+
+  /**
    * Connecte un compte : login one-shot via la plateforme + persist credentials chiffrés.
    * Endpoint synchrone — ~3-8s côté client.
    */

@@ -60,26 +60,41 @@ export class LbcResolveAttributesStep
       key: string;
       label: string;
       choices: LbcDepositChoice[];
+      required: boolean;
     }> = [];
 
     for (const item of schema.definitions.items) {
       const key = associatedKey(item);
       if (!key || !sendable(item)) continue;
 
-      const direct = this.getDirectValue(key, ctx);
-      if (direct !== undefined) {
-        filled[key] = direct;
-        continue;
+      // `condition` : identifiers autorisés variables par catégorie. On mappe
+      // listing.condition vers un identifier valide du schéma ; si ça ne tombe
+      // pas juste, on laisse le batch LLM choisir (plutôt qu'envoyer en dur une
+      // valeur refusée comme "neuf").
+      if (key === 'condition') {
+        const cond = this.resolveCondition(item, ctx);
+        if (cond !== undefined) {
+          filled[key] = cond;
+          continue;
+        }
+      } else {
+        const direct = this.getDirectValue(key, ctx);
+        if (direct !== undefined) {
+          filled[key] = direct;
+          continue;
+        }
       }
 
-      if (!isMandatory(item)) continue;
-
+      // On batch tout champ à choix (mandatory OU optionnel). `required` pilote
+      // ensuite si le LLM est forcé de répondre : un optionnel peut être laissé
+      // vide quand l'annonce ne permet pas un choix fidèle (anti-invention).
       const staticChoices = item.answer_modelization?.multiple_answers?.choices;
       if (staticChoices?.length) {
         llmBatch.push({
           key,
           label: item.decoration?.label ?? key,
           choices: staticChoices,
+          required: isMandatory(item),
         });
       }
       // Les conditional_choices sont gérés en pass 2.
@@ -94,7 +109,7 @@ export class LbcResolveAttributesStep
     for (const item of schema.definitions.items) {
       const key = associatedKey(item);
       if (!key || filled[key] !== undefined) continue;
-      if (!sendable(item) || !isMandatory(item)) continue;
+      if (!sendable(item)) continue;
 
       const choices = resolveConditionalChoices(item, filled);
       if (!choices?.length) continue;
@@ -104,20 +119,43 @@ export class LbcResolveAttributesStep
         key,
         item.decoration?.label ?? key,
         choices,
+        isMandatory(item),
       );
       if (value) filled[key] = value;
     }
 
-    // ─── Diagnostic : repérer les mandatory non remplis ────────────────────
-    const missing: string[] = [];
+    // ─── Diagnostic : champs non remplis (pour itérer sur la complétude) ────
+    const missingMandatory: string[] = [];
+    const unfilledChoice: string[] = [];
+    const unfilledFreeText: string[] = [];
     for (const item of schema.definitions.items) {
       const key = associatedKey(item);
-      if (!key || !sendable(item) || !isMandatory(item)) continue;
-      if (filled[key] === undefined || filled[key] === null) missing.push(key);
+      if (!key || !sendable(item)) continue;
+      if (filled[key] !== undefined && filled[key] !== null) continue;
+
+      const label = item.decoration?.label ?? key;
+      const hasChoices =
+        !!item.answer_modelization?.multiple_answers?.choices?.length ||
+        !!item.dynamic_rules?.conditional_choices?.length;
+      (hasChoices ? unfilledChoice : unfilledFreeText).push(`${key}(${label})`);
+      if (isMandatory(item)) missingMandatory.push(key);
     }
-    if (missing.length > 0) {
+    if (missingMandatory.length > 0) {
       this.logger.warn(
-        `Champs mandatory non résolus (le submit risque d'échouer) : ${missing.join(', ')}`,
+        `Champs mandatory non résolus (le submit risque d'échouer) : ${missingMandatory.join(', ')}`,
+      );
+    }
+    // Texte libre = pas de choix → l'enum LLM ne peut pas les remplir. Si un
+    // champ important (ex: marque) apparaît ici, il faudra une résolution
+    // texte-libre dédiée (comme l'ISBN Vinted).
+    if (unfilledFreeText.length > 0) {
+      this.logger.debug(
+        `Champs texte-libre non remplis : ${unfilledFreeText.join(', ')}`,
+      );
+    }
+    if (unfilledChoice.length > 0) {
+      this.logger.debug(
+        `Champs à choix non remplis (LLM n'a pas tranché) : ${unfilledChoice.join(', ')}`,
       );
     }
 
@@ -146,10 +184,8 @@ export class LbcResolveAttributesStep
         return ctx.account.phone ?? null;
       case 'donation':
         return '0';
-      case 'condition':
-        return ctx.listing.condition
-          ? CONDITION_TO_LBC[ctx.listing.condition]
-          : undefined;
+      // `condition` est traité à part (resolveCondition) car ses identifiers
+      // autorisés dépendent de la catégorie — pas de mapping en dur ici.
       case 'ad_submission_id':
         return randomUUID();
       case 'title_adparams_prediction_id':
@@ -173,6 +209,48 @@ export class LbcResolveAttributesStep
     }
   }
 
+  // ─── Résolution `condition` (identifiers variables par catégorie) ─────────
+
+  /**
+   * Mappe `listing.condition` vers un identifier de condition VALIDE pour la
+   * catégorie courante. Ordre : (1) identifier préféré présent dans les choix,
+   * (2) match par label, (3) abandon → le batch LLM tranchera (et on logge les
+   * choix dispo pour diagnostiquer). Si le champ n'expose pas de choix statiques
+   * (vocabulaire global ou choix conditionnels), on retombe sur le mapping
+   * historique / les passes suivantes.
+   */
+  private resolveCondition(
+    item: LbcDepositItem,
+    ctx: LbcPublishContext,
+  ): string | undefined {
+    if (!ctx.listing.condition) return undefined;
+    const preferred = CONDITION_TO_LBC[ctx.listing.condition];
+
+    const choices = item.answer_modelization?.multiple_answers?.choices;
+    if (!choices?.length) {
+      // Pas de choix statiques : soit vocabulaire global (mapping historique OK),
+      // soit choix conditionnels → laisser la pass 2 gérer (undefined).
+      return preferred;
+    }
+
+    // 1) identifier préféré directement valide
+    if (choices.some((c) => c.identifier === preferred)) return preferred;
+
+    // 2) match par label (les libellés sont plus stables que les identifiers)
+    const wanted = CONDITION_LABELS[ctx.listing.condition];
+    const byLabel = choices.find(
+      (c) => c.label && wanted.includes(normalizeLabel(c.label)),
+    );
+    if (byLabel) return byLabel.identifier;
+
+    // 3) rien ne matche → on laisse le LLM choisir, et on logge le vocabulaire
+    this.logger.warn(
+      `condition : aucun choix ne matche ${ctx.listing.condition} (préféré="${preferred}"). ` +
+        `Choix dispo → ${choices.map((c) => `${c.identifier}=${c.label ?? '?'}`).join(', ')} — délégué au LLM`,
+    );
+    return undefined;
+  }
+
   // ─── LLM : batch (pass 1) ────────────────────────────────────────────────
 
   private async llmFillBatch(
@@ -181,6 +259,7 @@ export class LbcResolveAttributesStep
       key: string;
       label: string;
       choices: LbcDepositChoice[];
+      required: boolean;
     }>,
   ): Promise<Record<string, string>> {
     const properties: Record<string, unknown> = {};
@@ -194,11 +273,13 @@ export class LbcResolveAttributesStep
     const tool: Anthropic.Tool = {
       name: 'fill_listing_fields',
       description:
-        'Renseigne chaque champ du formulaire en choisissant la valeur la plus pertinente.',
+        'Renseigne les champs du formulaire. Les champs optionnels peuvent être omis si l\'annonce ne permet pas un choix fidèle.',
       input_schema: {
         type: 'object',
         properties,
-        required: fields.map((f) => f.key),
+        // Seuls les champs obligatoires sont requis : le LLM peut omettre un
+        // optionnel plutôt que d'inventer une valeur.
+        required: fields.filter((f) => f.required).map((f) => f.key),
       } as Anthropic.Tool['input_schema'],
     };
 
@@ -222,11 +303,16 @@ export class LbcResolveAttributesStep
     const out: Record<string, string> = {};
     for (const f of fields) {
       const v = input[f.key];
-      if (
-        typeof v === 'string' &&
-        f.choices.some((c) => c.identifier === v)
-      ) {
+      if (typeof v === 'string' && f.choices.some((c) => c.identifier === v)) {
         out[f.key] = v;
+      } else if (v === undefined || v === null || v === '') {
+        // Champ laissé vide par le LLM. Normal pour un optionnel (l'annonce ne
+        // permettait pas un choix fidèle) ; problématique seulement si obligatoire.
+        if (f.required) {
+          this.logger.warn(
+            `LLM batch : champ obligatoire "${f.key}" non renseigné`,
+          );
+        }
       } else {
         this.logger.warn(
           `LLM batch : valeur invalide pour "${f.key}" (reçu ${JSON.stringify(v)})`,
@@ -243,14 +329,22 @@ export class LbcResolveAttributesStep
     key: string,
     label: string,
     choices: LbcDepositChoice[],
+    required: boolean,
   ): Promise<string | undefined> {
-    const result = await this.llmFillBatch(ctx, [{ key, label, choices }]);
+    const result = await this.llmFillBatch(ctx, [
+      { key, label, choices, required },
+    ]);
     return result[key];
   }
 
   private buildUserPrompt(
     ctx: LbcPublishContext,
-    fields: Array<{ key: string; label: string; choices: LbcDepositChoice[] }>,
+    fields: Array<{
+      key: string;
+      label: string;
+      choices: LbcDepositChoice[];
+      required: boolean;
+    }>,
   ): string {
     const lines = [
       `Annonce à publier :`,
@@ -258,11 +352,11 @@ export class LbcResolveAttributesStep
       `- Description : ${ctx.listing.description}`,
       `- Catégorie LBC : ${ctx.category?.name ?? '?'}`,
       ``,
-      `Pour chaque champ ci-dessous, choisis la valeur (identifier) la plus pertinente parmi les choix listés :`,
+      `Renseigne chaque champ en suivant les règles. Les champs "(optionnel)" peuvent être omis si l'annonce ne permet pas un choix fidèle :`,
       ``,
     ];
     for (const f of fields) {
-      lines.push(`▸ ${f.key} — ${f.label}`);
+      lines.push(`▸ ${f.key} — ${f.label}${f.required ? '' : ' (optionnel)'}`);
       for (const c of f.choices) {
         lines.push(`    · ${c.identifier} = ${c.label ?? c.identifier}`);
       }
@@ -273,9 +367,22 @@ export class LbcResolveAttributesStep
 }
 
 const SYSTEM_PROMPT = `Tu es un assistant qui remplit le formulaire de dépôt d'annonce Leboncoin.
-Pour chaque champ, tu reçois la liste des valeurs autorisées (identifier + libellé humain).
-Tu dois choisir l'identifier qui décrit le mieux le produit, en te basant sur le titre, la description et la catégorie.
-Si plusieurs identifiers semblent plausibles, prends le plus spécifique. Si rien ne colle, prends "other" / "autre" quand c'est dispo, sinon le plus neutre.
+Pour chaque champ tu reçois la liste des valeurs autorisées (identifier + libellé). Tu te bases sur le titre, la description et la catégorie.
+
+Choisis la valeur qui désigne le MÊME produit que l'annonce, même si le libellé n'est pas identique :
+- une variante / un sous-modèle du même produit — ex: "PS3 Ultra Slim" → "PS3 Slim" (c'est la même console) ;
+- un synonyme ;
+- un terme plus général qui englobe correctement le produit — ex: matière "laiton" → "Métal" s'il existe dans la liste.
+Entre plusieurs valeurs qui correspondent vraiment, prends la plus spécifique.
+
+INTERDIT — ne choisis JAMAIS une valeur "sœur" qui désigne un produit DIFFÉRENT, même ressemblant : "laiton" n'est PAS "Bronze" ; une PS3 n'est PAS une PS4. Ne remplace pas la vraie valeur par une autre valeur spécifique au hasard.
+
+Sinon :
+- Si aucune valeur ne désigne ni n'englobe correctement le produit → choisis "autre" / "other" s'il existe.
+- Si l'annonce ne donne pas l'information (tu devrais deviner au hasard) :
+   - champ optionnel → NE LE RENSEIGNE PAS (laisse-le absent),
+   - champ obligatoire → choisis "autre"/"other" si dispo, sinon la valeur la plus neutre.
+
 Réponds via le tool fill_listing_fields.`;
 
 // ─── Helpers (purs, testables) ───────────────────────────────────────────
@@ -335,6 +442,7 @@ function buildLbcLocation(loc: ListingLocation): Record<string, unknown> {
   };
 }
 
+/** Identifier "préféré" par condition (vocabulaire historique LBC). */
 const CONDITION_TO_LBC: Record<ListingCondition, string> = {
   [ListingCondition.NEW_WITH_TAGS]: 'neuf',
   [ListingCondition.NEW_WITHOUT_TAGS]: 'commeneuf',
@@ -342,3 +450,34 @@ const CONDITION_TO_LBC: Record<ListingCondition, string> = {
   [ListingCondition.GOOD]: 'bonetat',
   [ListingCondition.FAIR]: 'etatsatisfaisant',
 };
+
+/**
+ * Libellés (normalisés) acceptés par condition, pour matcher un choix du schéma
+ * quand l'identifier préféré n'est pas présent (les identifiers varient par
+ * catégorie, les libellés beaucoup moins).
+ */
+const CONDITION_LABELS: Record<ListingCondition, string[]> = {
+  [ListingCondition.NEW_WITH_TAGS]: [
+    'neuf',
+    'neuf avec etiquette',
+    'etat neuf',
+  ],
+  [ListingCondition.NEW_WITHOUT_TAGS]: [
+    'neuf sans etiquette',
+    'comme neuf',
+    'etat neuf',
+  ],
+  [ListingCondition.VERY_GOOD]: ['tres bon etat'],
+  [ListingCondition.GOOD]: ['bon etat'],
+  [ListingCondition.FAIR]: ['etat satisfaisant', 'satisfaisant'],
+};
+
+/** minuscule, sans accents, espaces compressés — pour comparer des libellés. */
+function normalizeLabel(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}

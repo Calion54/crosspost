@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { AccountNeedsReconnectException } from '../../accounts/account-needs-reconnect.exception.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Page } from 'playwright';
@@ -406,21 +407,15 @@ export class LeboncoinAuthService implements PlatformAuthAdapter {
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken,
       };
-      await this.store.updateCredentials(
-        account._id,
-        updated,
-        refreshed.expiresAt,
-      );
-      account.tokenExpiresAt = refreshed.expiresAt;
+      await this.store.updateCredentials(account, updated, refreshed.expiresAt);
       return updated;
     } catch (err) {
+      const reason = (err as Error).message;
       this.logger.error(
-        `Refresh JWT échoué pour account ${account._id.toString()}: ${(err as Error).message}`,
+        `Refresh JWT échoué pour account ${account._id.toString()}: ${reason}`,
       );
       await this.store.markNeedsReconnect(account._id);
-      throw new UnauthorizedException(
-        'Session Leboncoin expirée, reconnexion nécessaire',
-      );
+      throw new AccountNeedsReconnectException(account, reason);
     }
   }
 

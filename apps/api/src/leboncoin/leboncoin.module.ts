@@ -4,6 +4,7 @@ import { EncryptionModule } from '../common/crypto/encryption.module.js';
 import { HttpModule } from '../common/http/http.module.js';
 import { BrowserModule } from '../browser/browser.module.js';
 import { MediaModule } from '../media/media.module.js';
+import { ListingReuseModule } from '../listings/listing-reuse.module.js';
 import {
   Account,
   AccountSchema,
@@ -38,6 +39,7 @@ import { LbcConfirmAdStep } from './publish/steps/lbc-confirm-ad.step.js';
     BrowserModule,
     HttpModule,
     MediaModule,
+    ListingReuseModule,
     MongooseModule.forFeature([
       { name: Account.name, schema: AccountSchema },
       { name: Listing.name, schema: ListingSchema },

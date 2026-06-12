@@ -13,6 +13,11 @@ export type AccountSummaryResponse = z.infer<typeof accountSummaryResponseSchema
 
 export const accountResponseSchema = accountSummaryResponseSchema.extend({
   isConnected: z.boolean(),
+  needsReconnect: z.boolean(),
+  externalUserId: z.string().optional(),
+  connectedAt: z.coerce.date().optional(),
+  tokenExpiresAt: z.coerce.date().optional(),
+  lastRefreshedAt: z.coerce.date().optional(),
 });
 export type AccountResponse = z.infer<typeof accountResponseSchema>;
 
@@ -36,6 +41,11 @@ export const listingResponseSchema = z.object({
   media: z.array(listingMediaSchema),
   mediaUrls: z.array(z.string()),
   publications: z.array(publicationResponseSchema),
+  /**
+   * Calculé (non stocké) : true si au moins une publication est SOLD.
+   * Une annonce ne se vend qu'une fois — un seul indicateur global suffit.
+   */
+  sold: z.boolean().default(false),
 });
 export type ListingResponse = z.infer<typeof listingResponseSchema>;
 

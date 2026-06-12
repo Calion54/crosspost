@@ -6,7 +6,7 @@ import axios, {
 } from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import type { CookieJar } from 'tough-cookie';
-import type { ZodIssue, ZodType } from 'zod';
+import type { ZodIssue, ZodType, ZodTypeDef } from 'zod';
 
 export interface HttpRequestOptions<T = unknown> {
   /** Méthode HTTP (default: GET). */
@@ -27,8 +27,12 @@ export interface HttpRequestOptions<T = unknown> {
    * Zod schema appliqué au body en cas de réponse 2xx. Throw HttpValidationError
    * si le payload ne match pas. Recommandation : utiliser `.passthrough()` sur les
    * objets pour ne pas casser quand LBC/Vinted ajoute un nouveau champ.
+   *
+   * Input typé `unknown` (et pas `T`) : un schéma dont un champ a un `.default()`
+   * a un type d'entrée ≠ sortie, ce qui le rendrait non-assignable à `ZodType<T>`.
+   * On ne contraint que la SORTIE (`T`) ; `safeParse` prend de toute façon `unknown`.
    */
-  responseSchema?: ZodType<T>;
+  responseSchema?: ZodType<T, ZodTypeDef, unknown>;
 }
 
 /**

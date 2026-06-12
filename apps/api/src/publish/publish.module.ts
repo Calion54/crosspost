@@ -1,37 +1,32 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+import { BullModule } from '@nestjs/bullmq';
+import { BullBoardModule } from '@bull-board/nestjs';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { PublishController } from './publish.controller.js';
 import { PublishService } from './publish.service.js';
-import { PlatformPublishDispatcher } from './platform-publish.dispatcher.js';
-import { LeboncoinModule } from '../leboncoin/leboncoin.module.js';
-import { VintedModule } from '../vinted/vinted.module.js';
-import {
-  Account,
-  AccountSchema,
-} from '../accounts/schemas/account.schema.js';
-import {
-  Listing,
-  ListingSchema,
-} from '../listings/schemas/listing.schema.js';
-import {
-  Publication,
-  PublicationSchema,
-} from '../publications/schemas/publication.schema.js';
-import { User, UserSchema } from '../users/schemas/user.schema.js';
+import { PublishProcessor } from './publish.processor.js';
+import { PublishEventBus } from './publish-event-bus.service.js';
+import { PUBLISH_QUEUE } from './publish.queue.js';
+import { PlatformPublishModule } from './platform-publish.module.js';
+import { AccountsModule } from '../accounts/accounts.module.js';
+import { ListingsModule } from '../listings/listings.module.js';
+import { UsersModule } from '../users/users.module.js';
+import { PublicationsModule } from '../publications/publications.module.js';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Account.name, schema: AccountSchema },
-      { name: Listing.name, schema: ListingSchema },
-      { name: Publication.name, schema: PublicationSchema },
-      { name: User.name, schema: UserSchema },
-    ]),
-    LeboncoinModule,
-    VintedModule,
+    BullModule.registerQueue({ name: PUBLISH_QUEUE }),
+    BullBoardModule.forFeature({
+      name: PUBLISH_QUEUE,
+      adapter: BullMQAdapter,
+    }),
+    PlatformPublishModule,
+    AccountsModule,
+    ListingsModule,
+    UsersModule,
+    PublicationsModule,
   ],
   controllers: [PublishController],
-  providers: [PublishService, PlatformPublishDispatcher],
-  exports: [PlatformPublishDispatcher],
+  providers: [PublishService, PublishProcessor, PublishEventBus],
 })
 export class PublishModule {}

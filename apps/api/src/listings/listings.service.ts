@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type {
@@ -6,26 +6,18 @@ import type {
   UpdateListingDto,
 } from './dto/listing.dto.js';
 import {
-  PublicationStatus,
+  ListingStatusFilter,
   type ListingQueryDto,
 } from '@crosspost/shared';
 import { Listing, type ListingDocument } from './schemas/listing.schema.js';
-import {
-  Publication,
-  type PublicationDocument,
-} from '../publications/schemas/publication.schema.js';
 import { PublicationsService } from '../publications/publications.service.js';
 import { MediaService } from '../media/media.service.js';
 import type { DeletePublicationResult } from '../publish/platform-publish.types.js';
 
 @Injectable()
 export class ListingsService {
-  private readonly logger = new Logger(ListingsService.name);
-
   constructor(
     @InjectModel(Listing.name) private listingModel: Model<ListingDocument>,
-    @InjectModel(Publication.name)
-    private publicationModel: Model<PublicationDocument>,
     private mediaService: MediaService,
     private publicationsService: PublicationsService,
   ) {}
@@ -38,13 +30,21 @@ export class ListingsService {
   }
 
   /**
+   * Document Listing hydraté par id, sans scope user ni presign média.
+   * Réservé aux workers (publish) qui passent le document aux steps plateforme.
+   * Les endpoints front utilisent `findOne(userId, id)` (scopé + mediaUrls).
+   */
+  getById(id: string): Promise<ListingDocument | null> {
+    return this.listingModel.findById(new Types.ObjectId(id)).exec();
+  }
+
+  /**
    * Single aggregation pipeline : filter + sort (createdAt or computed
    * earliest publishedAt) + paginate + populate publications (with their
    * account summary). Only the S3 presign step lives outside Mongo.
    */
   async findAll(userId: string, query: ListingQueryDto) {
-    const { page, limit, q, sort, platforms, accountIds, unpublishedOnly } =
-      query;
+    const { page, limit, q, sort, platforms, accountIds, statusFilter } = query;
     const skip = (page - 1) * limit;
     const match: Record<string, unknown> = {
       userId: new Types.ObjectId(userId),
@@ -54,27 +54,30 @@ export class ListingsService {
       match.title = { $regex: escaped, $options: 'i' };
     }
 
-    // Post-lookup match : filters that need the populated publications.
-    const postMatch: Record<string, unknown> = {};
+    // Post-lookup match : filters qui dépendent des publications peuplées.
+    const postAnd: Record<string, unknown>[] = [];
     if (platforms?.length) {
-      postMatch['publications.platform'] = { $in: platforms };
+      postAnd.push({ 'publications.platform': { $in: platforms } });
     }
     if (accountIds?.length) {
-      postMatch['publications.accountId._id'] = {
-        $in: accountIds.map((id) => new Types.ObjectId(id)),
-      };
+      postAnd.push({
+        'publications.accountId._id': {
+          $in: accountIds.map((id) => new Types.ObjectId(id)),
+        },
+      });
     }
-    if (unpublishedOnly) {
-      // No publication has reached PUBLISHED status (also matches listings
-      // with empty publications array).
-      postMatch['publications.status'] = {
-        $nin: [PublicationStatus.PUBLISHED],
-      };
+    // Statut : partition vendu / actif (publié & non vendu) / non publié.
+    if (statusFilter === ListingStatusFilter.SOLD) {
+      match.sold = true; // dénormalisé sur le Listing → pré-lookup.
+    } else if (statusFilter === ListingStatusFilter.ACTIVE) {
+      match.sold = { $ne: true };
+      postAnd.push({ 'publications.0': { $exists: true } }); // au moins 1 pub.
+    } else if (statusFilter === ListingStatusFilter.UNPUBLISHED) {
+      postAnd.push({ 'publications.0': { $exists: false } }); // aucune pub.
     }
+    const postMatch = postAnd.length ? { $and: postAnd } : null;
 
-    const byPublishedAt = sort.startsWith('publishedAt:');
     const dir: 1 | -1 = sort.endsWith(':asc') ? 1 : -1;
-    const sentinel = dir === 1 ? new Date('9999-12-31') : new Date(0);
 
     const populatePublications = {
       $lookup: {
@@ -99,51 +102,20 @@ export class ListingsService {
       },
     };
 
-    const sortSpec: Record<string, 1 | -1> = byPublishedAt
-      ? { _publishedAt: dir, _id: 1 }
-      : { createdAt: dir, _id: 1 };
-    const sortStage = { $sort: sortSpec };
-
-    const addPublishedAt = {
-      $addFields: {
-        _publishedAt: {
-          $ifNull: [
-            {
-              $min: {
-                $map: {
-                  input: {
-                    $filter: {
-                      input: '$publications',
-                      as: 'p',
-                      cond: {
-                        $eq: ['$$p.status', PublicationStatus.PUBLISHED],
-                      },
-                    },
-                  },
-                  as: 'pub',
-                  in: '$$pub.publishedAt',
-                },
-              },
-            },
-            sentinel,
-          ],
-        },
-      },
+    // Vendues en dernier (`sold` false avant true), puis date de création.
+    // Tri directement sur les champs du Listing.
+    const sortStage = {
+      $sort: { sold: 1, publishedAt: dir, _id: dir } as Record<string, 1 | -1>,
     };
 
     const pipeline = [
       { $match: match },
       populatePublications,
-      ...(Object.keys(postMatch).length ? [{ $match: postMatch }] : []),
-      ...(byPublishedAt ? [addPublishedAt] : []),
+      ...(postMatch ? [{ $match: postMatch }] : []),
       sortStage,
       {
         $facet: {
-          items: [
-            { $skip: skip },
-            { $limit: limit },
-            ...(byPublishedAt ? [{ $project: { _publishedAt: 0 } }] : []),
-          ],
+          items: [{ $skip: skip }, { $limit: limit }],
           total: [{ $count: 'count' }],
         },
       },
@@ -153,13 +125,13 @@ export class ListingsService {
     const listings = (result?.items ?? []) as Array<
       ListingDocument & { publications: unknown[] }
     >;
-    const total =
-      (result?.total?.[0]?.count as number | undefined) ?? 0;
+    const total = (result?.total?.[0]?.count as number | undefined) ?? 0;
 
     // S3 presign — separate concern (not Mongo).
     const allKeys = listings.flatMap((l) => (l.media || []).map((m) => m.key));
     const urlMap = await this.mediaService.getSignedUrls(allKeys);
 
+    // `sold` est déjà sur le document Listing (dénormalisé).
     const items = listings.map((listing) => ({
       ...listing,
       mediaUrls: (listing.media || [])
@@ -182,11 +154,7 @@ export class ListingsService {
 
     const keys = (listing.media || []).map((m) => m.key);
     const [publications, urlMap] = await Promise.all([
-      this.publicationModel
-        .find({ listingId: listing._id })
-        .populate('accountId', 'platform email')
-        .lean()
-        .exec(),
+      this.publicationsService.findByListingWithAccount(listing._id),
       this.mediaService.getSignedUrls(keys),
     ]);
 
@@ -239,9 +207,9 @@ export class ListingsService {
       .exec();
     if (!listing) throw new NotFoundException('Listing not found');
 
-    const publications = await this.publicationModel
-      .find({ listingId: listing._id })
-      .exec();
+    const publications = await this.publicationsService.findByListing(
+      listing._id.toString(),
+    );
 
     const results: Array<{
       platform: string;

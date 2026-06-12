@@ -66,6 +66,17 @@ export class SyncProcessor extends WorkerHost {
 
   @OnWorkerEvent('failed')
   onFailed(job: Job<SyncJobData>, err: Error) {
+    // `failed` se déclenche à CHAQUE tentative. On ne notifie le front que sur
+    // l'échec final (retries épuisés) — sinon un échec transitoire rattrapé par
+    // un retry affiche une bannière d'erreur alors que le sync a réussi.
+    const maxAttempts = job.opts.attempts ?? 1;
+    const isFinalAttempt = job.attemptsMade >= maxAttempts;
+    if (!isFinalAttempt) {
+      this.logger.warn(
+        `Sync job ${job.id} tentative ${job.attemptsMade}/${maxAttempts} échouée (retry) : ${err.message}`,
+      );
+      return;
+    }
     this.logger.error(`Sync job ${job.id} échoué : ${err.message}`);
     this.bus.emit({
       type: 'failed',

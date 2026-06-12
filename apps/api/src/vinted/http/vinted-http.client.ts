@@ -1,9 +1,10 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { AxiosResponse, Method } from 'axios';
-import type { ZodType } from 'zod';
-import { VintedCredentialsSchema } from '@crosspost/shared';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { AccountCredentialsStore } from '../../accounts/account-credentials.store.js';
+import { AccountNeedsReconnectException } from '../../accounts/account-needs-reconnect.exception.js';
 import { HttpService } from '../../common/http/http.service.js';
+import { VintedAuthService } from '../auth/vinted-auth.service.js';
 import { VINTED_DEFAULT_USER_AGENT } from '../vinted-platform.config.js';
 import type { AccountDocument } from '../../accounts/schemas/account.schema.js';
 
@@ -12,7 +13,7 @@ export interface VintedRequestConfig<T = unknown> {
   url: string;
   data?: unknown;
   label?: string;
-  responseSchema?: ZodType<T>;
+  responseSchema?: ZodType<T, ZodTypeDef, unknown>;
   /** Headers spécifiques au call (multipart Content-Type, Referer custom…). */
   headers?: Record<string, string>;
 }
@@ -23,25 +24,24 @@ export interface VintedRequestConfig<T = unknown> {
  * (access_token_web + session + datadome + cf_clearance) + les headers
  * `x-csrf-token` / `x-anon-id`. Le transport (axios + logs) est délégué à HttpService.
  *
- * Pas de refresh proactif pour l'instant : sur 401/403 on marque l'account
- * needsReconnect (l'access token vit ~2h, largement suffisant post-login).
+ * Refresh proactif via `VintedAuthService.ensureValidToken` à chaque requête.
+ * Sur 401/403 réactif (token rejeté entre temps) → AccountNeedsReconnectException.
  */
 @Injectable()
 export class VintedHttpClient {
   private readonly logger = new Logger(VintedHttpClient.name);
 
   constructor(
-    private readonly store: AccountCredentialsStore,
+    private readonly auth: VintedAuthService,
     private readonly http: HttpService,
+    private readonly store: AccountCredentialsStore,
   ) {}
 
   async request<T = unknown>(
     account: AccountDocument,
     config: VintedRequestConfig<T>,
   ): Promise<AxiosResponse<T>> {
-    const creds = VintedCredentialsSchema.parse(
-      this.store.decryptCredentials(account),
-    );
+    const creds = await this.auth.ensureValidToken(account);
 
     const cookiePairs: Array<[string, string | undefined]> = [
       ['access_token_web', creds.accessToken],
@@ -75,11 +75,22 @@ export class VintedHttpClient {
       responseSchema: config.responseSchema,
     });
 
-    if (res.status === 401 || res.status === 403) {
+    // 401 = token rejeté côté Vinted. ensureValidToken a déjà refreshé proactivement
+    // si l'expiration approchait, donc un 401 ici = creds vraiment cassés.
+    if (res.status === 401) {
       await this.store.markNeedsReconnect(account._id);
-      throw new UnauthorizedException(
-        'Session Vinted expirée/bloquée, reconnexion nécessaire',
+      throw new AccountNeedsReconnectException(
+        account,
+        `HTTP 401 sur ${config.url} (token rejeté après refresh proactif)`,
       );
+    }
+    // 403 = erreur métier Vinted (ex: access_denied code=106 sur un item qui n'est
+    // plus le tien, déjà supprimé, etc.). On laisse bubble — pas une auth cassée.
+    // Toute réponse non-401 prouve que les creds marchent : reset le flag si stale.
+    if (account.needsReconnect) {
+      await this.store.markConnected(account._id);
+      account.needsReconnect = false;
+      account.isConnected = true;
     }
     return res;
   }

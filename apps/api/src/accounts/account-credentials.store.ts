@@ -61,18 +61,30 @@ export class AccountCredentialsStore {
     return JSON.parse(this.encryption.decrypt(account.credentialsEnc));
   }
 
-  /** Update partiel après refresh : nouveau blob + nouvelle expiration. */
+  /**
+   * Update partiel après refresh : nouveau blob + nouvelle expiration.
+   * Mute AUSSI le doc en mémoire : les requêtes suivantes qui réutilisent ce
+   * même `account` (ex: pagination de sync, refresh proactif) relisent
+   * `credentialsEnc`/`tokenExpiresAt` dessus. Sans ça, elles renverraient
+   * l'ancien token/datadome (le doc en mémoire divergerait de la DB) → 401.
+   */
   async updateCredentials<T>(
-    accountId: Types.ObjectId | string,
+    account: AccountDocument,
     credentials: T,
     tokenExpiresAt: Date,
   ): Promise<void> {
     const credentialsEnc = this.encryption.encrypt(JSON.stringify(credentials));
+    const now = new Date();
+    account.credentialsEnc = credentialsEnc;
+    account.tokenExpiresAt = tokenExpiresAt;
+    account.lastRefreshedAt = now;
+    account.isConnected = true;
+    account.needsReconnect = false;
     await this.accountModel
-      .findByIdAndUpdate(accountId, {
+      .findByIdAndUpdate(account._id, {
         credentialsEnc,
         tokenExpiresAt,
-        lastRefreshedAt: new Date(),
+        lastRefreshedAt: now,
         isConnected: true,
         needsReconnect: false,
       })
@@ -85,6 +97,21 @@ export class AccountCredentialsStore {
       .findByIdAndUpdate(accountId, {
         isConnected: false,
         needsReconnect: true,
+      })
+      .exec();
+  }
+
+  /**
+   * Reset le flag `needsReconnect` quand un appel HTTP réel a réussi : preuve
+   * que les creds marchent. Appelé par les HTTP clients après chaque réponse
+   * non-401, et uniquement si le flag était à true (évite une écriture DB
+   * inutile sur le cas nominal).
+   */
+  async markConnected(accountId: Types.ObjectId | string): Promise<void> {
+    await this.accountModel
+      .findByIdAndUpdate(accountId, {
+        isConnected: true,
+        needsReconnect: false,
       })
       .exec();
   }

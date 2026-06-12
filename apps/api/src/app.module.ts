@@ -4,6 +4,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
+import { BullBoardModule } from '@bull-board/nestjs';
+import { ExpressAdapter } from '@bull-board/express';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { LlmModule } from './common/llm/llm.module.js';
@@ -17,6 +19,7 @@ import { PublishModule } from './publish/publish.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { SettingsModule } from './settings/settings.module.js';
+import { UsersModule } from './users/users.module.js';
 
 @Module({
   imports: [
@@ -36,8 +39,16 @@ import { SettingsModule } from './settings/settings.module.js';
         },
       }),
     }),
+    // Dashboard de monitoring des queues BullMQ. Monté en dehors de /api parce
+    // que c'est un outil ops, pas une API métier. Chaque module qui enregistre
+    // une queue doit ajouter BullBoardModule.forFeature pour qu'elle apparaisse.
+    BullBoardModule.forRoot({
+      route: '/admin/queues',
+      adapter: ExpressAdapter,
+    }),
     LlmModule,
     EncryptionModule,
+    UsersModule,
     ListingsModule,
     PublicationsModule,
     AccountsModule,

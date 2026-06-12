@@ -6,6 +6,21 @@ import { z } from 'zod';
  * partagés. `.passthrough()` partout pour absorber les champs additionnels.
  */
 
+// ─── Erreurs Vinted ─────────────────────────────────────────────────────────
+// Enveloppe d'erreur standard : `{ code: number, message: string, message_code: string }`.
+
+/**
+ * `code: 106` / `message_code: "access_denied"` — état métier non auth :
+ * l'annonce est verrouillée par Vinted (vente en cours non validée par
+ * l'acheteur, etc.). HTTP 403 mais le compte est OK.
+ */
+export const VintedAccessDeniedSchema = z
+  .object({
+    code: z.literal(106),
+    message_code: z.literal('access_denied'),
+  })
+  .passthrough();
+
 // ─── Step 1 : upload photo ─────────────────────────────────────────────────
 // POST /api/v2/photos (multipart/form-data, 1 image)
 // → { id, temp_uuid, url, thumbnails, ... } — on ne lit que ce dont on a besoin

@@ -156,6 +156,20 @@ export class LeboncoinPublishService implements PlatformPublishAdapter {
       }
       return { status: 'deleted' };
     }
+    // LBC renvoie un 500 (corps vide) quand l'annonce n'existe déjà plus, au
+    // lieu d'un 404 propre. On traite donc un 5xx comme idempotent
+    // (already_gone) pour pouvoir nettoyer la Publication et republier. Risque
+    // assumé : un 5xx réellement transitoire (annonce encore en ligne) dropperait
+    // la ligne à tort — récupérable via un resync / un nouveau publish.
+    if (res.status >= 500) {
+      this.logger.warn(
+        `LBC ${listId} : delete HTTP ${res.status} — annonce supposée déjà absente, traitée en already_gone`,
+      );
+      return {
+        status: 'already_gone',
+        message: `HTTP ${res.status} (supposé déjà supprimé)`,
+      };
+    }
     return {
       status: 'failed',
       message: `HTTP ${res.status} — ${JSON.stringify(res.data)?.slice(0, 200)}`,

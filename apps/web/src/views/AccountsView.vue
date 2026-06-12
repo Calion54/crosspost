@@ -51,7 +51,18 @@
           </td>
         </tr>
         <tr v-for="account in accounts" :key="account._id">
-          <td>{{ account.platform }}</td>
+          <td>
+            <div class="d-flex align-center ga-2">
+              <img
+                :src="platformImage(account.platform)"
+                :alt="platformLabel(account.platform)"
+                width="22"
+                height="22"
+                class="rounded"
+              />
+              {{ platformLabel(account.platform) }}
+            </div>
+          </td>
           <td>{{ account.email }}</td>
           <td>
             <v-chip
@@ -88,6 +99,7 @@
                   variant="text"
                   color="primary"
                   :loading="isSyncing(account._id)"
+                  :disabled="isSyncing(account._id)"
                   @click="syncAccount(account._id)"
                 />
               </template>
@@ -117,7 +129,7 @@
           <v-form ref="formRef" @submit.prevent="submitConnect">
             <v-select
               v-model="formPlatform"
-              :items="platformItems"
+              :items="PLATFORM_OPTIONS"
               label="Plateforme"
               variant="outlined"
               density="comfortable"
@@ -181,8 +193,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { Platform } from '@crosspost/shared';
+import { Platform, type AccountResponse } from '@crosspost/shared';
 import apiClient from '@/api/client';
+import {
+  dismissReconnectAlert,
+  useAccountReconnect,
+} from '@/composables/account-reconnect';
+import { useAccounts } from '@/composables/accounts';
+import {
+  PLATFORM_OPTIONS,
+  platformImage,
+  platformLabel,
+} from '@/utils/platform';
 
 interface SyncEvent {
   type: 'queued' | 'started' | 'completed' | 'failed';
@@ -198,24 +220,9 @@ interface SyncEvent {
   error?: string;
 }
 
-interface AccountSummary {
-  _id: string;
-  platform: Platform;
-  email: string;
-  externalUserId: string;
-  isConnected: boolean;
-  needsReconnect: boolean;
-  connectedAt: string;
-  tokenExpiresAt: string;
-  lastRefreshedAt?: string;
-}
+type AccountSummary = AccountResponse;
 
-const platformItems = [
-  { title: 'Leboncoin', value: Platform.LEBONCOIN },
-  { title: 'Vinted', value: Platform.VINTED },
-];
-
-const accounts = ref<AccountSummary[]>([]);
+const { accounts, fetchAccounts: fetchAccountsRaw } = useAccounts();
 const error = ref('');
 const removingId = ref<string | null>(null);
 const syncingAccountIds = ref<Set<string>>(new Set());
@@ -235,8 +242,7 @@ const canSubmit = computed(
 
 async function fetchAccounts() {
   try {
-    const { data } = await apiClient.get<AccountSummary[]>('/accounts');
-    accounts.value = data;
+    await fetchAccountsRaw();
   } catch {
     error.value = 'Impossible de récupérer les comptes';
   }
@@ -257,6 +263,8 @@ function closeConnectDialog() {
   formPassword.value = '';
 }
 
+const reconnectAlert = useAccountReconnect();
+
 async function submitConnect() {
   if (!canSubmit.value) return;
   connecting.value = true;
@@ -270,6 +278,13 @@ async function submitConnect() {
     connectDialog.value = false;
     formPassword.value = '';
     await fetchAccounts();
+    // If the global "needs reconnect" alert was for this account, clear it.
+    if (
+      reconnectAlert.body?.platform === formPlatform.value &&
+      reconnectAlert.body?.email === formEmail.value
+    ) {
+      dismissReconnectAlert();
+    }
   } catch (err: any) {
     const message =
       err?.response?.data?.message ??
@@ -294,13 +309,21 @@ async function removeAccount(id: string) {
 }
 
 async function syncAccount(accountId: string) {
+  if (isSyncing(accountId)) return;
   syncMessage.value = '';
   error.value = '';
+  // Optimistic spinner — n'attend pas l'event SSE 'queued'. Le 'completed' /
+  // 'failed' du worker fera disparaître le spinner.
+  const next = new Set(syncingAccountIds.value);
+  next.add(accountId);
+  syncingAccountIds.value = next;
   try {
     await apiClient.post(`/sync/${accountId}`);
-    // L'event 'queued' arrivera via SSE et activera le spinner.
   } catch {
     error.value = 'Impossible de lancer la synchronisation';
+    const rollback = new Set(syncingAccountIds.value);
+    rollback.delete(accountId);
+    syncingAccountIds.value = rollback;
   }
 }
 
@@ -358,7 +381,7 @@ function statusLabel(account: AccountSummary): string {
   return account.isConnected ? 'Connecté' : 'Déconnecté';
 }
 
-function formatDate(value?: string): string {
+function formatDate(value?: string | Date): string {
   if (!value) return '-';
   return new Date(value).toLocaleString('fr-FR');
 }

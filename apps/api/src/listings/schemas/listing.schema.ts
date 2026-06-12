@@ -42,6 +42,23 @@ export class Listing {
 
   @Prop({ type: [{ key: String, contentType: String }], default: [] })
   media: ListingMedia[];
+
+  /**
+   * Dénormalisé : true si au moins une publication est SOLD. Maintenu par le
+   * sync — permet de filtrer / trier directement sur le Listing sans `$lookup`.
+   * Une annonce ne se vend qu'une fois → un seul booléen global suffit.
+   */
+  @Prop({ required: true, default: false })
+  sold: boolean;
+
+  /**
+   * Date de mise en ligne sur la plateforme (Vinted: 1ère photo ; LBC:
+   * first_publication_date ; création manuelle: now). Sert au tri — plus
+   * fiable que createdAt (identique pour tout un batch de sync).
+   */
+  @Prop({ required: true, default: () => new Date() })
+  publishedAt: Date;
 }
 
 export const ListingSchema = SchemaFactory.createForClass(Listing);
+ListingSchema.index({ userId: 1, sold: 1, publishedAt: -1 });

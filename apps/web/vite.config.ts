@@ -37,6 +37,11 @@ export default defineConfig({
         target: 'http://localhost:5174',
         changeOrigin: true,
       },
+      // bull-board UI (BullMQ dashboard) — outil ops monté côté API.
+      '/admin': {
+        target: 'http://localhost:5174',
+        changeOrigin: true,
+      },
     },
   },
 });

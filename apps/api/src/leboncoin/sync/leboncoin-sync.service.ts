@@ -11,15 +11,10 @@ import {
   type LbcDashboardSearchResponse,
 } from './lbc-api.schemas.js';
 import {
-  Listing,
-  type ListingDocument,
-} from '../../listings/schemas/listing.schema.js';
-import {
   Publication,
   type PublicationDocument,
 } from '../../publications/schemas/publication.schema.js';
-import { ImageImporterService } from '../../media/image-importer.service.js';
-import { normalizeTitle } from '../../listings/listing-title.util.js';
+import { ListingReuseService } from '../../listings/listing-reuse.service.js';
 import {
   LBC_DASHBOARD_SEARCH_URL,
   LBC_WEB_HOST,
@@ -52,9 +47,7 @@ export class LeboncoinSyncService implements PlatformSyncAdapter {
     private readonly client: LeboncoinHttpClient,
     private readonly categoryMapper: LeboncoinCategoryMapper,
     private readonly attributeMapper: LeboncoinAttributeMapper,
-    private readonly imageImporter: ImageImporterService,
-    @InjectModel(Listing.name)
-    private readonly listingModel: Model<ListingDocument>,
+    private readonly reuse: ListingReuseService,
     @InjectModel(Publication.name)
     private readonly publicationModel: Model<PublicationDocument>,
   ) {}
@@ -70,10 +63,6 @@ export class LeboncoinSyncService implements PlatformSyncAdapter {
 
     const ads = await this.fetchAllAds(account);
     this.logger.log(`  → ${ads.length} annonces récupérées via l'API LBC`);
-
-    // Index titre→listingId existant (dédup cross-plateforme : ne pas recréer
-    // une annonce déjà importée via une autre plateforme, ex. Vinted).
-    const existingByTitle = await this.buildTitleIndex(userId);
 
     // Log explicite des statuts pour faire le tri "vivante" vs "morte".
     // Si une annonce supprimée reste publiée côté Crosspost, c'est ici qu'on
@@ -110,7 +99,7 @@ export class LeboncoinSyncService implements PlatformSyncAdapter {
       }
 
       try {
-        await this.importAd(userId, account._id, ad, existingByTitle);
+        await this.importAd(userId, account._id, ad);
         created++;
       } catch (err) {
         this.logger.error(
@@ -178,73 +167,39 @@ export class LeboncoinSyncService implements PlatformSyncAdapter {
     return all;
   }
 
-  /** Map titre normalisé → listingId, pour tous les listings de l'user. */
-  private async buildTitleIndex(
-    userId: string,
-  ): Promise<Map<string, Types.ObjectId>> {
-    const listings = await this.listingModel
-      .find({ userId: new Types.ObjectId(userId) })
-      .select('_id title')
-      .lean()
-      .exec();
-    const map = new Map<string, Types.ObjectId>();
-    for (const l of listings) {
-      map.set(normalizeTitle(l.title), l._id);
-    }
-    return map;
-  }
-
   /**
-   * Crée la Publication LBC. Si un Listing au même titre existe déjà (ex.
-   * synced via Vinted), on le réutilise au lieu d'en recréer un.
+   * Extrait les champs LBC puis délègue la dédup + création à
+   * ListingReuseService (logique partagée avec Vinted).
    */
   private async importAd(
     userId: string,
     accountId: Types.ObjectId,
     ad: LbcAd,
-    existingByTitle: Map<string, Types.ObjectId>,
   ): Promise<void> {
     const externalId = String(ad.list_id);
-    const externalUrl =
-      ad.url ?? `${LBC_WEB_HOST}/ad/${externalId}.htm`;
+    const externalUrl = ad.url ?? `${LBC_WEB_HOST}/ad/${externalId}.htm`;
+    const category = await this.categoryMapper.toUniversal(ad.category_name);
+    const { condition, color, packageSize } = this.attributeMapper.parse(ad);
 
-    let listingId = existingByTitle.get(normalizeTitle(ad.subject));
-
-    if (!listingId) {
-      const price = extractPrice(ad);
-      const category = await this.categoryMapper.toUniversal(ad.category_name);
-      const { condition, color, packageSize } = this.attributeMapper.parse(ad);
-      const imageUrls = pickImageUrls(ad);
-
-      // Import des images (best-effort, parallèle)
-      const media = imageUrls.length
-        ? await this.imageImporter.importMany(userId, imageUrls)
-        : [];
-
-      const listing = await this.listingModel.create({
-        userId: new Types.ObjectId(userId),
-        title: ad.subject,
+    await this.reuse.importSyncedListing({
+      userId,
+      accountId,
+      platform: Platform.LEBONCOIN,
+      title: ad.subject,
+      price: extractPrice(ad),
+      imageUrls: pickImageUrls(ad),
+      fields: {
         description: ad.body ?? '',
-        price,
+        packageSize, // M par défaut
         category,
         condition, // null si pas trouvé dans les attributes
         color, // null si pas trouvé
-        packageSize, // M par défaut
         // location est gérée au niveau User.defaultLocation (page Settings).
-        // On ne stocke plus la location LBC ici — au publish on utilise celle de l'user.
-        media,
-      });
-      listingId = listing._id;
-      existingByTitle.set(normalizeTitle(ad.subject), listingId);
-    }
-
-    await this.publicationModel.create({
-      listingId,
-      accountId,
-      platform: Platform.LEBONCOIN,
-      status: PublicationStatus.PUBLISHED,
+      },
       externalId,
       externalUrl,
+      status: PublicationStatus.PUBLISHED,
+      publishedAt: parseLbcPublishedAt(ad.first_publication_date),
     });
   }
 }
@@ -255,6 +210,17 @@ function extractPrice(ad: LbcAd): number {
   if (typeof ad.price === 'number') return ad.price;
   if (Array.isArray(ad.price) && ad.price.length > 0) return ad.price[0];
   return 0;
+}
+
+/**
+ * Parse le format LBC `"YYYY-MM-DD HH:mm:ss"` (heure Paris).
+ * Interprété comme local time du serveur — décalage de 1-2h possible vs UTC,
+ * négligeable pour un tri par date de publication.
+ */
+function parseLbcPublishedAt(value?: string): Date | undefined {
+  if (!value) return undefined;
+  const d = new Date(value.replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 

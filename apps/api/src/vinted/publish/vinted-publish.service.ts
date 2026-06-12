@@ -21,6 +21,7 @@ import {
   VINTED_NEW_ITEM_PAGE,
   VINTED_WEB_HOST,
 } from '../vinted-platform.config.js';
+import { VintedAccessDeniedSchema } from './vinted-publish.schemas.js';
 import type { VintedPublishContext } from './vinted-publish.context.js';
 import { VintedUploadPhotosStep } from './steps/vinted-upload-photos.step.js';
 import { VintedResolveCategoryStep } from './steps/vinted-resolve-category.step.js';
@@ -144,6 +145,21 @@ export class VintedPublishService implements PlatformPublishAdapter {
     if (res.status >= 200 && res.status < 300) {
       this.logger.log(`Vinted ${publication.externalId} supprimé`);
       return { status: 'deleted' };
+    }
+    // 403 + access_denied = état métier (annonce verrouillée par Vinted, vente en
+    // cours non validée…). Pas une auth cassée.
+    if (
+      res.status === 403 &&
+      VintedAccessDeniedSchema.safeParse(res.data).success
+    ) {
+      this.logger.warn(
+        `Vinted ${publication.externalId} : suppression refusée (vente en cours ?)`,
+      );
+      return {
+        status: 'failed',
+        message:
+          'Vinted refuse la suppression — annonce verrouillée (vente en cours non validée par l\'acheteur).',
+      };
     }
     return {
       status: 'failed',

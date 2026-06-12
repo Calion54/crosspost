@@ -73,6 +73,14 @@ export interface VintedPublishContext {
    */
   resolvedAttrs?: Record<string, number>;
 
+  /**
+   * ISBN-13 du livre (champ texte libre, pas un enum d'options). Résolu par
+   * `resolve-attributes` uniquement quand la catégorie expose l'attribut `isbn`
+   * (`configuration: null`) — extrait du texte de l'annonce ou identifié par le
+   * LLM. `undefined` si non résolu. Posé au root `item.isbn` par `submit-item`.
+   */
+  isbn?: string;
+
   /** ID de l'annonce Vinted finale (renvoyé à l'orchestrateur). */
   externalId?: string;
   /** URL publique de l'annonce Vinted. */

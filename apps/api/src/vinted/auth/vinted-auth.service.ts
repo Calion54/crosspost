@@ -10,9 +10,16 @@ import {
   type VintedCredentials,
 } from '@crosspost/shared';
 import { BrowserService } from '../../browser/browser.service.js';
+import { HttpService } from '../../common/http/http.service.js';
+import { AccountCredentialsStore } from '../../accounts/account-credentials.store.js';
+import { AccountNeedsReconnectException } from '../../accounts/account-needs-reconnect.exception.js';
 import {
   VINTED_DEFAULT_USER_AGENT,
   VINTED_HOME_URL,
+  VINTED_MEMBER_URL,
+  VINTED_TOKEN_REFRESH_SKEW_MS,
+  VINTED_TOKEN_REFRESH_URL,
+  VINTED_WEB_HOST,
 } from '../vinted-platform.config.js';
 import type { AccountDocument } from '../../accounts/schemas/account.schema.js';
 import type {
@@ -38,7 +45,132 @@ interface VintedJwtPayload {
 export class VintedAuthService implements PlatformAuthAdapter {
   private readonly logger = new Logger(VintedAuthService.name);
 
-  constructor(private readonly browser: BrowserService) {}
+  constructor(
+    private readonly browser: BrowserService,
+    private readonly http: HttpService,
+    private readonly store: AccountCredentialsStore,
+  ) {}
+
+  /**
+   * Garantit que les credentials Vinted sont utilisables : refresh HTTP via
+   * le cookie `refresh_token_web` si le JWT expire dans moins de
+   * VINTED_TOKEN_REFRESH_SKEW_MS. Throw `AccountNeedsReconnectException`
+   * (et marque `needsReconnect: true`) si le refresh échoue — révoqué côté
+   * Vinted, datadome killé, etc.
+   */
+  async ensureValidToken(
+    account: AccountDocument,
+  ): Promise<VintedCredentials> {
+    const creds = VintedCredentialsSchema.parse(
+      this.store.decryptCredentials(account),
+    );
+    const remainingMs = account.tokenExpiresAt.getTime() - Date.now();
+    if (remainingMs > VINTED_TOKEN_REFRESH_SKEW_MS) {
+      return creds;
+    }
+
+    this.logger.log(
+      `Access token Vinted expire dans ${Math.round(remainingMs / 1000)}s, refresh account ${account._id.toString()}`,
+    );
+
+    try {
+      const refreshed = await this.refreshAccessToken(account, creds);
+      const updated: VintedCredentials = {
+        ...creds,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        sessionCookie: refreshed.sessionCookie,
+      };
+      await this.store.updateCredentials(account, updated, refreshed.expiresAt);
+      return updated;
+    } catch (err) {
+      const reason = (err as Error).message;
+      this.logger.error(
+        `Refresh Vinted échoué pour account ${account._id.toString()}: ${reason}`,
+      );
+      await this.store.markNeedsReconnect(account._id);
+      throw new AccountNeedsReconnectException(account, reason);
+    }
+  }
+
+  private async refreshAccessToken(
+    account: AccountDocument,
+    creds: VintedCredentials,
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    sessionCookie: string;
+    expiresAt: Date;
+  }> {
+    const cookie = [
+      ['refresh_token_web', creds.refreshToken],
+      ['access_token_web', creds.accessToken],
+      ['_vinted_fr_session', creds.sessionCookie],
+      ['datadome', creds.datadomeCookie],
+      ['cf_clearance', creds.cfClearanceCookie],
+      ['anon_id', creds.anonId],
+    ]
+      .filter(([, v]) => !!v)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+
+    // Browser-like fingerprint headers — DataDome inspects these. Hardcoded
+    // pairs match VINTED_DEFAULT_USER_AGENT (Chrome 148 on macOS).
+    const headers: Record<string, string> = {
+      'User-Agent': creds.userAgent || VINTED_DEFAULT_USER_AGENT,
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'fr',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+      'Content-Length': '0',
+      Locale: 'fr-FR',
+      Origin: VINTED_WEB_HOST,
+      Referer: VINTED_MEMBER_URL(account.externalUserId),
+      Priority: 'u=1, i',
+      'sec-ch-ua':
+        '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'x-csrf-token': creds.csrfToken,
+      Cookie: cookie,
+    };
+    if (creds.anonId) headers['x-anon-id'] = creds.anonId;
+
+    const res = await this.http.request<unknown>({
+      method: 'POST',
+      url: VINTED_TOKEN_REFRESH_URL,
+      label: 'vinted:refresh',
+      headers,
+      timeout: 15_000,
+    });
+
+    if (res.status !== 200) {
+      throw new Error(
+        `Refresh HTTP ${res.status} : ${JSON.stringify(res.data)?.slice(0, 200)}`,
+      );
+    }
+
+    // Vinted répond sans body — les nouveaux tokens sont dans Set-Cookie.
+    const cookies = parseSetCookies(res.headers['set-cookie']);
+    const newAccess = cookies.access_token_web;
+    if (!newAccess) {
+      throw new Error('Refresh OK mais access_token_web absent dans Set-Cookie');
+    }
+    const payload = decodeJwt(newAccess);
+    const expiresAt = payload.exp
+      ? new Date(payload.exp * 1000)
+      : new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    return {
+      accessToken: newAccess,
+      refreshToken: cookies.refresh_token_web ?? creds.refreshToken,
+      sessionCookie: cookies._vinted_fr_session ?? creds.sessionCookie,
+      expiresAt,
+    };
+  }
 
   async loginWithPassword(
     email: string,
@@ -280,6 +412,27 @@ function extractCsrfToken(html: string): string | undefined {
     if (m?.[1]) return m[1];
   }
   return undefined;
+}
+
+/**
+ * Parse les headers Set-Cookie d'une réponse Axios en map nom → valeur (la
+ * valeur seule, sans les attributs Path/HttpOnly/etc.).
+ */
+function parseSetCookies(
+  raw: string[] | string | undefined,
+): Record<string, string> {
+  if (!raw) return {};
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const out: Record<string, string> = {};
+  for (const line of arr) {
+    const [pair] = line.split(';');
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (name) out[name] = value;
+  }
+  return out;
 }
 
 /** Décode le payload d'un JWT (sans vérif de signature). */

@@ -10,15 +10,10 @@ import {
   type VintedWardrobeItemsResponse,
 } from './vinted-api.schemas.js';
 import {
-  Listing,
-  type ListingDocument,
-} from '../../listings/schemas/listing.schema.js';
-import {
   Publication,
   type PublicationDocument,
 } from '../../publications/schemas/publication.schema.js';
-import { ImageImporterService } from '../../media/image-importer.service.js';
-import { normalizeTitle } from '../../listings/listing-title.util.js';
+import { ListingReuseService } from '../../listings/listing-reuse.service.js';
 import { VINTED_WARDROBE_ITEMS_URL } from '../vinted-platform.config.js';
 import type { AccountDocument } from '../../accounts/schemas/account.schema.js';
 import type {
@@ -35,9 +30,7 @@ export class VintedSyncService implements PlatformSyncAdapter {
 
   constructor(
     private readonly client: VintedHttpClient,
-    private readonly imageImporter: ImageImporterService,
-    @InjectModel(Listing.name)
-    private readonly listingModel: Model<ListingDocument>,
+    private readonly reuse: ListingReuseService,
     @InjectModel(Publication.name)
     private readonly publicationModel: Model<PublicationDocument>,
   ) {}
@@ -52,31 +45,36 @@ export class VintedSyncService implements PlatformSyncAdapter {
     const items = await this.fetchAllItems(account);
     this.logger.log(`  → ${items.length} annonces récupérées via l'API Vinted`);
 
-    // Index titre→listingId existant (dédup cross-plateforme : ne pas recréer
-    // une annonce déjà importée via LBC). Match sur titre normalisé.
-    const existingByTitle = await this.buildTitleIndex(userId);
-
     let created = 0;
     let skipped = 0;
     let errors = 0;
 
     for (const item of items) {
       const externalId = String(item.id);
-      const exists = await this.publicationModel
+      const existing = await this.publicationModel
         .findOne({
           accountId: account._id,
           platform: Platform.VINTED,
           externalId,
         })
-        .lean()
         .exec();
-      if (exists) {
+      if (existing) {
+        // Réconciliation idempotente du statut de la publication (PUBLISHED↔SOLD)
+        // d'après l'état Vinted courant.
+        const status = extractStatus(item);
+        if (existing.status !== status) {
+          await this.publicationModel
+            .updateOne({ _id: existing._id }, { $set: { status } })
+            .exec();
+          await this.reuse.reconcileListingSold(existing.listingId);
+          this.logger.log(`  → publication ${externalId} → ${status}`);
+        }
         skipped++;
         continue;
       }
 
       try {
-        await this.importItem(userId, account._id, item, existingByTitle);
+        await this.importItem(userId, account._id, item);
         created++;
       } catch (err) {
         this.logger.error(
@@ -86,7 +84,8 @@ export class VintedSyncService implements PlatformSyncAdapter {
       }
     }
 
-    // Cleanup : annonces disparues côté Vinted → on retire leur Publication.
+    // Cleanup : annonces disparues côté Vinted → on retire leur Publication,
+    // SAUF les publications déjà marquées vendues (on garde pour stats / historique).
     const liveExternalIds = new Set(items.map((i) => String(i.id)));
     const deleteRes = await this.publicationModel
       .deleteMany({
@@ -135,64 +134,34 @@ export class VintedSyncService implements PlatformSyncAdapter {
     return all;
   }
 
-  /** Map titre normalisé → listingId, pour tous les listings de l'user. */
-  private async buildTitleIndex(
-    userId: string,
-  ): Promise<Map<string, Types.ObjectId>> {
-    const listings = await this.listingModel
-      .find({ userId: new Types.ObjectId(userId) })
-      .select('_id title')
-      .lean()
-      .exec();
-    const map = new Map<string, Types.ObjectId>();
-    for (const l of listings) {
-      map.set(normalizeTitle(l.title), l._id);
-    }
-    return map;
-  }
-
   /**
-   * Crée la Publication Vinted. Si un Listing au même titre existe déjà
-   * (synced via LBC), on le réutilise au lieu d'en recréer un.
+   * Extrait les champs Vinted puis délègue la dédup + création à
+   * ListingReuseService (logique partagée avec Leboncoin).
    */
   private async importItem(
     userId: string,
     accountId: Types.ObjectId,
     item: VintedItem,
-    existingByTitle: Map<string, Types.ObjectId>,
   ): Promise<void> {
     const externalId = String(item.id);
     const externalUrl = item.url ?? `https://www.vinted.fr/items/${externalId}`;
 
-    let listingId = existingByTitle.get(normalizeTitle(item.title));
-
-    if (!listingId) {
-      // Pas d'annonce existante → on en crée une depuis les données Vinted.
-      const imageUrls = pickImageUrls(item);
-      const media = imageUrls.length
-        ? await this.imageImporter.importMany(userId, imageUrls)
-        : [];
-
-      const listing = await this.listingModel.create({
-        userId: new Types.ObjectId(userId),
-        title: item.title,
-        description: item.title, // l'API wardrobe n'expose pas la description
-        price: extractPrice(item),
-        condition: mapCondition(item.status),
-        packageSize: PackageSize.M,
-        media,
-      });
-      listingId = listing._id;
-      existingByTitle.set(normalizeTitle(item.title), listingId);
-    }
-
-    await this.publicationModel.create({
-      listingId,
+    await this.reuse.importSyncedListing({
+      userId,
       accountId,
       platform: Platform.VINTED,
-      status: PublicationStatus.PUBLISHED,
+      title: item.title,
+      price: extractPrice(item),
+      imageUrls: pickImageUrls(item),
+      fields: {
+        description: item.title, // l'API wardrobe n'expose pas la description
+        packageSize: PackageSize.M,
+        condition: mapCondition(item.status),
+      },
       externalId,
       externalUrl,
+      status: extractStatus(item),
+      publishedAt: extractPublishedAt(item),
     });
   }
 }
@@ -209,6 +178,28 @@ function pickImageUrls(item: VintedItem): string[] {
   return item.photos
     .map((p) => p.full_size_url ?? p.url)
     .filter((u): u is string => !!u);
+}
+
+/**
+ * La date de publication n'est pas exposée directement par l'API wardrobe.
+ * On utilise le timestamp d'upload de la 1ère photo (Unix seconds) comme
+ * proxy — l'utilisateur upload les photos juste avant de submit, donc c'est
+ * fiable à <1 min près.
+ */
+function extractPublishedAt(item: VintedItem): Date | undefined {
+  const ts = item.photos[0]?.high_resolution?.timestamp;
+  return ts ? new Date(ts * 1000) : undefined;
+}
+
+/**
+ * Statut de la publication depuis Vinted. Détection stricte : SOLD seulement
+ * si `item_closing_action === 'sold'` ; tout le reste (actif, reserved,
+ * not_sold…) = PUBLISHED.
+ */
+function extractStatus(item: VintedItem): PublicationStatus {
+  return item.is_closed && item.item_closing_action === 'sold'
+    ? PublicationStatus.SOLD
+    : PublicationStatus.PUBLISHED;
 }
 
 const VINTED_STATUS_TO_CONDITION: Record<string, ListingCondition> = {

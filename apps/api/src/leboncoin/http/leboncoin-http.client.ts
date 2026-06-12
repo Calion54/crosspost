@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CookieJar } from 'tough-cookie';
 import type { AxiosResponse, Method } from 'axios';
-import type { ZodType } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import type { LeboncoinCredentials } from '@crosspost/shared';
 import { LeboncoinAuthService } from '../auth/leboncoin-auth.service.js';
 import { AccountCredentialsStore } from '../../accounts/account-credentials.store.js';
+import { AccountNeedsReconnectException } from '../../accounts/account-needs-reconnect.exception.js';
 import { HttpService } from '../../common/http/http.service.js';
 import type { AccountDocument } from '../../accounts/schemas/account.schema.js';
 import { buildLbcApiHeaders } from './leboncoin-headers.js';
@@ -17,7 +18,7 @@ export interface LeboncoinRequestConfig<T = unknown> {
   headers?: Record<string, string>;
   label?: string;
   /** Schema Zod pour valider la réponse 2xx (auto-typage de `res.data`). */
-  responseSchema?: ZodType<T>;
+  responseSchema?: ZodType<T, ZodTypeDef, unknown>;
 }
 
 /**
@@ -64,6 +65,26 @@ export class LeboncoinHttpClient {
     });
 
     await this.maybePersistDatadomeReroll(account, jar, creds);
+
+    // 401 = token rejeté côté LBC (datadome rerollé / session invalidée) malgré
+    // le refresh proactif. HttpService ne throw pas sur non-2xx (res.data vide) :
+    // sans ce garde, l'appelant exploiterait une réponse vide (ex: `payload.ads`
+    // undefined → "batch is not iterable"). On lève proprement → needsReconnect.
+    if (res.status === 401) {
+      await this.store.markNeedsReconnect(account._id);
+      throw new AccountNeedsReconnectException(
+        account,
+        `HTTP 401 sur ${config.url} (token rejeté après refresh proactif)`,
+      );
+    }
+
+    // ensureValidToken aurait throw en cas d'auth cassée ; on a une réponse →
+    // les creds marchent. Reset le flag si stale.
+    if (account.needsReconnect) {
+      await this.store.markConnected(account._id);
+      account.needsReconnect = false;
+      account.isConnected = true;
+    }
     return res;
   }
 
@@ -81,7 +102,7 @@ export class LeboncoinHttpClient {
           datadomeCookie: newDatadome,
         };
         await this.store.updateCredentials(
-          account._id,
+          account,
           updated,
           account.tokenExpiresAt,
         );

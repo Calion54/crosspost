@@ -5,7 +5,12 @@ import Anthropic from '@anthropic-ai/sdk';
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
 export interface LlmMessageParams {
-  system?: string;
+  /**
+   * Prompt système. Passer un tableau de blocs `text` permet d'y placer un
+   * `cache_control: { type: 'ephemeral' }` pour activer le prompt caching sur
+   * une portion stable (ex: gros catalogue identique à chaque appel).
+   */
+  system?: string | Anthropic.TextBlockParam[];
   messages: Anthropic.MessageParam[];
   maxTokens?: number;
   tools?: Anthropic.Tool[];

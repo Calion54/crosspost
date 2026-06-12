@@ -51,12 +51,7 @@ export const updateListingSchema = createListingSchema.partial();
 
 export type UpdateListingDto = z.infer<typeof updateListingSchema>;
 
-export const listingSortSchema = z.enum([
-  'createdAt:desc',
-  'createdAt:asc',
-  'publishedAt:desc',
-  'publishedAt:asc',
-]);
+export const listingSortSchema = z.enum(['createdAt:desc', 'createdAt:asc']);
 export type ListingSort = z.infer<typeof listingSortSchema>;
 export const DEFAULT_LISTING_SORT: ListingSort = 'createdAt:desc';
 
@@ -67,6 +62,18 @@ const arrayQueryParam = <T extends z.ZodTypeAny>(item: T) =>
     z.array(item).optional(),
   );
 
+export enum ListingStatusFilter {
+  /** Tout. */
+  ALL = 'all',
+  /** Publiée quelque part et pas vendue. */
+  ACTIVE = 'active',
+  /** Vendue. */
+  SOLD = 'sold',
+  /** Aucune publication (brouillon / jamais postée). */
+  UNPUBLISHED = 'unpublished',
+}
+export const listingStatusFilterSchema = z.nativeEnum(ListingStatusFilter);
+
 export const listingQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -74,7 +81,7 @@ export const listingQuerySchema = z.object({
   sort: listingSortSchema.default(DEFAULT_LISTING_SORT),
   platforms: arrayQueryParam(z.nativeEnum(Platform)),
   accountIds: arrayQueryParam(z.string()),
-  unpublishedOnly: z.coerce.boolean().optional(),
+  statusFilter: listingStatusFilterSchema.default(ListingStatusFilter.ALL),
 });
 
 export type ListingQueryDto = z.infer<typeof listingQuerySchema>;

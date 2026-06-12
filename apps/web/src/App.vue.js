@@ -1,3 +1,18 @@
+import { onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { dismissReconnectAlert, useAccountReconnect, } from '@/composables/account-reconnect';
+import { useAccounts } from '@/composables/accounts';
+import { platformLabel } from '@/utils/platform';
+const router = useRouter();
+const reconnectAlert = useAccountReconnect();
+const { fetchAccounts } = useAccounts();
+onMounted(() => {
+    void fetchAccounts();
+});
+function goReconnect() {
+    router.push('/accounts');
+    dismissReconnectAlert();
+}
 debugger; /* PartiallyEnd: #3632/scriptSetup.vue */
 const __VLS_ctx = {};
 let __VLS_components;
@@ -131,11 +146,89 @@ const __VLS_50 = __VLS_asFunctionalComponent(__VLS_49, new __VLS_49({}));
 const __VLS_51 = __VLS_50({}, ...__VLS_functionalComponentArgsRest(__VLS_50));
 var __VLS_48;
 var __VLS_44;
+const __VLS_53 = {}.VSnackbar;
+/** @type {[typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, typeof __VLS_components.VSnackbar, typeof __VLS_components.vSnackbar, ]} */ ;
+// @ts-ignore
+const __VLS_54 = __VLS_asFunctionalComponent(__VLS_53, new __VLS_53({
+    modelValue: (!!__VLS_ctx.reconnectAlert.body),
+    timeout: (-1),
+    color: "error",
+    location: "top right",
+    multiLine: true,
+}));
+const __VLS_55 = __VLS_54({
+    modelValue: (!!__VLS_ctx.reconnectAlert.body),
+    timeout: (-1),
+    color: "error",
+    location: "top right",
+    multiLine: true,
+}, ...__VLS_functionalComponentArgsRest(__VLS_54));
+__VLS_56.slots.default;
+if (__VLS_ctx.reconnectAlert.body) {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "text-body-2 mt-1" },
+    });
+    (__VLS_ctx.platformLabel(__VLS_ctx.reconnectAlert.body.platform));
+    (__VLS_ctx.reconnectAlert.body.email);
+}
+{
+    const { actions: __VLS_thisSlot } = __VLS_56.slots;
+    const __VLS_57 = {}.VBtn;
+    /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
+    // @ts-ignore
+    const __VLS_58 = __VLS_asFunctionalComponent(__VLS_57, new __VLS_57({
+        ...{ 'onClick': {} },
+        variant: "text",
+        color: "white",
+    }));
+    const __VLS_59 = __VLS_58({
+        ...{ 'onClick': {} },
+        variant: "text",
+        color: "white",
+    }, ...__VLS_functionalComponentArgsRest(__VLS_58));
+    let __VLS_61;
+    let __VLS_62;
+    let __VLS_63;
+    const __VLS_64 = {
+        onClick: (__VLS_ctx.goReconnect)
+    };
+    __VLS_60.slots.default;
+    var __VLS_60;
+    const __VLS_65 = {}.VBtn;
+    /** @type {[typeof __VLS_components.VBtn, typeof __VLS_components.vBtn, ]} */ ;
+    // @ts-ignore
+    const __VLS_66 = __VLS_asFunctionalComponent(__VLS_65, new __VLS_65({
+        ...{ 'onClick': {} },
+        icon: "mdi-close",
+        variant: "text",
+    }));
+    const __VLS_67 = __VLS_66({
+        ...{ 'onClick': {} },
+        icon: "mdi-close",
+        variant: "text",
+    }, ...__VLS_functionalComponentArgsRest(__VLS_66));
+    let __VLS_69;
+    let __VLS_70;
+    let __VLS_71;
+    const __VLS_72 = {
+        onClick: (__VLS_ctx.dismissReconnectAlert)
+    };
+    var __VLS_68;
+}
+var __VLS_56;
 var __VLS_3;
+/** @type {__VLS_StyleScopedClasses['text-body-2']} */ ;
+/** @type {__VLS_StyleScopedClasses['mt-1']} */ ;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
-        return {};
+        return {
+            dismissReconnectAlert: dismissReconnectAlert,
+            platformLabel: platformLabel,
+            reconnectAlert: reconnectAlert,
+            goReconnect: goReconnect,
+        };
     },
 });
 export default (await import('vue')).defineComponent({

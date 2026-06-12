@@ -4,6 +4,7 @@ import { BrowserModule } from '../browser/browser.module.js';
 import { HttpModule } from '../common/http/http.module.js';
 import { EncryptionModule } from '../common/crypto/encryption.module.js';
 import { MediaModule } from '../media/media.module.js';
+import { ListingReuseModule } from '../listings/listing-reuse.module.js';
 import { Account, AccountSchema } from '../accounts/schemas/account.schema.js';
 import {
   Listing,
@@ -35,6 +36,7 @@ import { VintedSubmitItemStep } from './publish/steps/vinted-submit-item.step.js
     HttpModule,
     EncryptionModule,
     MediaModule,
+    ListingReuseModule,
     MongooseModule.forFeature([
       { name: Account.name, schema: AccountSchema },
       { name: Listing.name, schema: ListingSchema },

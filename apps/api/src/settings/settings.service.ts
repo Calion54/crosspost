@@ -1,8 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ListingLocation, UpdateSettingsDto } from '@crosspost/shared';
-import { User, type UserDocument } from '../users/schemas/user.schema.js';
+import { UsersService } from '../users/users.service.js';
 import { GeocodeService } from '../common/geocode/geocode.service.js';
 
 @Injectable()
@@ -10,41 +8,40 @@ export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
   constructor(
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    private readonly usersService: UsersService,
     private geocodeService: GeocodeService,
   ) {}
 
   async getSettings(userId: string) {
-    const user = await this.userModel
-      .findById(new Types.ObjectId(userId))
-      .select('defaultLocation')
-      .lean()
-      .exec();
-    if (!user) throw new NotFoundException('User not found');
-    return { defaultLocation: user.defaultLocation };
+    const defaultLocation =
+      await this.usersService.getDefaultLocationOrThrow(userId);
+    return { defaultLocation };
   }
 
   async updateSettings(userId: string, dto: UpdateSettingsDto) {
-    const patch: Partial<User> = {};
-    if (dto.location !== undefined) {
-      patch.defaultLocation = await this.resolveLocation(dto.location);
+    // location non fournie → on ne touche pas à la valeur existante.
+    if (dto.location === undefined) {
+      const defaultLocation =
+        await this.usersService.getDefaultLocationOrThrow(userId);
+      return { defaultLocation };
     }
 
-    const user = await this.userModel
-      .findByIdAndUpdate(new Types.ObjectId(userId), patch, { new: true })
-      .select('defaultLocation')
-      .lean()
-      .exec();
-    if (!user) throw new NotFoundException('User not found');
+    // La géolocalisation reste ici (logique métier Settings) ; la persistance
+    // passe par UsersService.
+    const location = await this.resolveLocation(dto.location);
+    const defaultLocation = await this.usersService.setDefaultLocation(
+      userId,
+      location,
+    );
 
     this.logger.log(
       `Settings mis à jour pour user ${userId} — location: ${
-        user.defaultLocation
-          ? `${user.defaultLocation.city} (${user.defaultLocation.zipcode})`
+        defaultLocation
+          ? `${defaultLocation.city} (${defaultLocation.zipcode})`
           : 'aucune'
       }`,
     );
-    return { defaultLocation: user.defaultLocation };
+    return { defaultLocation };
   }
 
   /** String libre → geocode (Google), objet structuré → utilisé direct. */

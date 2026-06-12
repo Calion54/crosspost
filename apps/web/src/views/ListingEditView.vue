@@ -115,14 +115,13 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { ListingCategory, ListingColor, ListingCondition, PackageSize } from '@crosspost/shared';
 import type { AutoFillResult, ListingMedia } from '@crosspost/shared';
 import apiClient from '@/api/client';
 import MediaUpload from '@/components/MediaUpload.vue';
 
 const route = useRoute();
-const router = useRouter();
 const id = route.params.id as string;
 
 const categories = [
@@ -255,8 +254,6 @@ async function onSubmit() {
     snackbar.text = 'Annonce mise a jour';
     snackbar.color = 'success';
     snackbar.show = true;
-
-    router.push('/listings');
   } catch (err: any) {
     snackbar.text = err.response?.data?.message || 'Erreur mise a jour';
     snackbar.color = 'error';

@@ -115,13 +115,15 @@ async function onSubmit() {
         if (form.color)
             payload.color = form.color;
         payload.packageSize = form.packageSize;
-        await apiClient.post('/listings', payload);
+        const { data } = await apiClient.post('/listings', payload);
         if (form.packageSize)
             localStorage.setItem('listing.packageSize', form.packageSize);
         snackbar.text = 'Annonce creee';
         snackbar.color = 'success';
         snackbar.show = true;
-        router.push('/listings');
+        // Redirige vers la page détail de l'annonce créée : évite de re-soumettre
+        // le même formulaire et donc de créer un doublon.
+        router.push(`/listings/${data._id}`);
     }
     catch (err) {
         snackbar.text = err.response?.data?.message || 'Erreur creation';

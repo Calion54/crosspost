@@ -128,7 +128,7 @@ export class VintedSubmitItemStep implements PublishStep<VintedPublishContext> {
       brand_id: brandId,
       brand: brandTitle,
       catalog_id: ctx.categoryId,
-      isbn: null,
+      isbn: ctx.isbn ?? null,
       is_unisex: false,
       ai_photo: false,
       price: ctx.listing.price,

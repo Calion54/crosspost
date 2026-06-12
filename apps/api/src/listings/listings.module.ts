@@ -4,19 +4,12 @@ import { ListingsController } from './listings.controller.js';
 import { ListingsService } from './listings.service.js';
 import { AutoFillService } from './auto-fill.service.js';
 import { Listing, ListingSchema } from './schemas/listing.schema.js';
-import {
-  Publication,
-  PublicationSchema,
-} from '../publications/schemas/publication.schema.js';
 import { PublicationsModule } from '../publications/publications.module.js';
 import { MediaModule } from '../media/media.module.js';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Listing.name, schema: ListingSchema },
-      { name: Publication.name, schema: PublicationSchema },
-    ]),
+    MongooseModule.forFeature([{ name: Listing.name, schema: ListingSchema }]),
     MediaModule,
     PublicationsModule,
   ],

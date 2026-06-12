@@ -1,11 +1,10 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Platform } from '@crosspost/shared';
 import apiClient from '@/api/client';
-const platformItems = [
-    { title: 'Leboncoin', value: Platform.LEBONCOIN },
-    { title: 'Vinted', value: Platform.VINTED },
-];
-const accounts = ref([]);
+import { dismissReconnectAlert, useAccountReconnect, } from '@/composables/account-reconnect';
+import { useAccounts } from '@/composables/accounts';
+import { PLATFORM_OPTIONS, platformImage, platformLabel, } from '@/utils/platform';
+const { accounts, fetchAccounts: fetchAccountsRaw } = useAccounts();
 const error = ref('');
 const removingId = ref(null);
 const syncingAccountIds = ref(new Set());
@@ -20,8 +19,7 @@ const formError = ref('');
 const canSubmit = computed(() => !!formEmail.value && !!formPassword.value && !connecting.value);
 async function fetchAccounts() {
     try {
-        const { data } = await apiClient.get('/accounts');
-        accounts.value = data;
+        await fetchAccountsRaw();
     }
     catch {
         error.value = 'Impossible de récupérer les comptes';
@@ -41,6 +39,7 @@ function closeConnectDialog() {
     formError.value = '';
     formPassword.value = '';
 }
+const reconnectAlert = useAccountReconnect();
 async function submitConnect() {
     if (!canSubmit.value)
         return;
@@ -55,6 +54,11 @@ async function submitConnect() {
         connectDialog.value = false;
         formPassword.value = '';
         await fetchAccounts();
+        // If the global "needs reconnect" alert was for this account, clear it.
+        if (reconnectAlert.body?.platform === formPlatform.value &&
+            reconnectAlert.body?.email === formEmail.value) {
+            dismissReconnectAlert();
+        }
     }
     catch (err) {
         const message = err?.response?.data?.message ??
@@ -80,14 +84,23 @@ async function removeAccount(id) {
     }
 }
 async function syncAccount(accountId) {
+    if (isSyncing(accountId))
+        return;
     syncMessage.value = '';
     error.value = '';
+    // Optimistic spinner — n'attend pas l'event SSE 'queued'. Le 'completed' /
+    // 'failed' du worker fera disparaître le spinner.
+    const next = new Set(syncingAccountIds.value);
+    next.add(accountId);
+    syncingAccountIds.value = next;
     try {
         await apiClient.post(`/sync/${accountId}`);
-        // L'event 'queued' arrivera via SSE et activera le spinner.
     }
     catch {
         error.value = 'Impossible de lancer la synchronisation';
+        const rollback = new Set(syncingAccountIds.value);
+        rollback.delete(accountId);
+        syncingAccountIds.value = rollback;
     }
 }
 function isSyncing(accountId) {
@@ -279,7 +292,17 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
         key: (account._id),
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
-    (account.platform);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "d-flex align-center ga-2" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.img)({
+        src: (__VLS_ctx.platformImage(account.platform)),
+        alt: (__VLS_ctx.platformLabel(account.platform)),
+        width: "22",
+        height: "22",
+        ...{ class: "rounded" },
+    });
+    (__VLS_ctx.platformLabel(account.platform));
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
     (account.email);
     __VLS_asFunctionalElement(__VLS_intrinsicElements.td, __VLS_intrinsicElements.td)({});
@@ -374,6 +397,7 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 variant: "text",
                 color: "primary",
                 loading: (__VLS_ctx.isSyncing(account._id)),
+                disabled: (__VLS_ctx.isSyncing(account._id)),
             }));
             const __VLS_54 = __VLS_53({
                 ...{ 'onClick': {} },
@@ -383,6 +407,7 @@ for (const [account] of __VLS_getVForSourceType((__VLS_ctx.accounts))) {
                 variant: "text",
                 color: "primary",
                 loading: (__VLS_ctx.isSyncing(account._id)),
+                disabled: (__VLS_ctx.isSyncing(account._id)),
             }, ...__VLS_functionalComponentArgsRest(__VLS_53));
             let __VLS_56;
             let __VLS_57;
@@ -503,7 +528,7 @@ const __VLS_98 = {}.VSelect;
 // @ts-ignore
 const __VLS_99 = __VLS_asFunctionalComponent(__VLS_98, new __VLS_98({
     modelValue: (__VLS_ctx.formPlatform),
-    items: (__VLS_ctx.platformItems),
+    items: (__VLS_ctx.PLATFORM_OPTIONS),
     label: "Plateforme",
     variant: "outlined",
     density: "comfortable",
@@ -511,7 +536,7 @@ const __VLS_99 = __VLS_asFunctionalComponent(__VLS_98, new __VLS_98({
 }));
 const __VLS_100 = __VLS_99({
     modelValue: (__VLS_ctx.formPlatform),
-    items: (__VLS_ctx.platformItems),
+    items: (__VLS_ctx.PLATFORM_OPTIONS),
     label: "Plateforme",
     variant: "outlined",
     density: "comfortable",
@@ -676,6 +701,10 @@ var __VLS_75;
 /** @type {__VLS_StyleScopedClasses['text-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-medium-emphasis']} */ ;
 /** @type {__VLS_StyleScopedClasses['pa-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['d-flex']} */ ;
+/** @type {__VLS_StyleScopedClasses['align-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['ga-2']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded']} */ ;
 /** @type {__VLS_StyleScopedClasses['mt-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['mt-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['mt-2']} */ ;
@@ -685,7 +714,9 @@ var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
-            platformItems: platformItems,
+            PLATFORM_OPTIONS: PLATFORM_OPTIONS,
+            platformImage: platformImage,
+            platformLabel: platformLabel,
             accounts: accounts,
             error: error,
             removingId: removingId,

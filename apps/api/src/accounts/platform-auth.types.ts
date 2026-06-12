@@ -28,4 +28,13 @@ export interface PlatformAuthAdapter {
    * on supprime le compte localement quoi qu'il arrive.
    */
   logout(account: AccountDocument): Promise<void>;
+
+  /**
+   * Garantit que les credentials sont utilisables tout de suite : refresh
+   * proactif si l'access token expire bientôt. Retourne les creds (frais
+   * ou inchangés). Throw `AccountNeedsReconnectException` si le refresh
+   * échoue (mark `needsReconnect: true` au passage).
+   * Appelé par le HTTP client avant chaque requête sortante.
+   */
+  ensureValidToken(account: AccountDocument): Promise<unknown>;
 }

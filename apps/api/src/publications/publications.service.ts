@@ -1,18 +1,16 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Platform, PublicationStatus } from '@crosspost/shared';
 import {
   Publication,
   type PublicationDocument,
 } from './schemas/publication.schema.js';
 import {
-  Account,
-  type AccountDocument,
-} from '../accounts/schemas/account.schema.js';
-import {
   Listing,
   type ListingDocument,
 } from '../listings/schemas/listing.schema.js';
+import { AccountsService } from '../accounts/accounts.service.js';
 import { PlatformPublishDispatcher } from '../publish/platform-publish.dispatcher.js';
 import type { DeletePublicationResult } from '../publish/platform-publish.types.js';
 
@@ -23,10 +21,12 @@ export class PublicationsService {
   constructor(
     @InjectModel(Publication.name)
     private publicationModel: Model<PublicationDocument>,
-    @InjectModel(Account.name)
-    private accountModel: Model<AccountDocument>,
+    // Listing reste injecté en direct UNIQUEMENT pour le check d'ownership de
+    // `remove()` : passer par ListingsService créerait un cycle DI
+    // (ListingsModule importe déjà PublicationsModule). Exception assumée.
     @InjectModel(Listing.name)
     private listingModel: Model<ListingDocument>,
+    private readonly accounts: AccountsService,
     private publishDispatcher: PlatformPublishDispatcher,
   ) {}
 
@@ -48,6 +48,74 @@ export class PublicationsService {
     return pub;
   }
 
+  /** Publications d'une annonce, avec le résumé du compte peuplé (vue détail). */
+  findByListingWithAccount(listingId: string | Types.ObjectId) {
+    return this.publicationModel
+      .find({ listingId })
+      .populate('accountId', 'platform email')
+      .lean()
+      .exec();
+  }
+
+  // ─── Persistance du cycle de publication (appelée par le worker publish) ────
+
+  /**
+   * Upsert la Publication en PENDING (1 par (listing, account, platform)).
+   * Ne touche pas externalId/externalUrl/publishCount : ils gardent l'état du
+   * dernier publish réussi tant que celui-ci n'a pas abouti.
+   */
+  upsertPending(p: {
+    listingId: string;
+    accountId: string;
+    platform: Platform;
+  }): Promise<PublicationDocument> {
+    const listingId = new Types.ObjectId(p.listingId);
+    const accountId = new Types.ObjectId(p.accountId);
+    return this.publicationModel
+      .findOneAndUpdate(
+        { listingId, accountId, platform: p.platform },
+        {
+          $set: {
+            listingId,
+            accountId,
+            platform: p.platform,
+            status: PublicationStatus.PENDING,
+            errorMessage: undefined,
+          },
+        },
+        { upsert: true, new: true },
+      )
+      .exec() as Promise<PublicationDocument>;
+  }
+
+  /** Passe la Publication en PUBLISHED (+ externalId/Url, publishedAt, publishCount++). */
+  async markPublished(
+    id: string,
+    result: { externalId: string; externalUrl: string },
+  ): Promise<void> {
+    await this.publicationModel
+      .findByIdAndUpdate(id, {
+        $set: {
+          status: PublicationStatus.PUBLISHED,
+          externalId: result.externalId,
+          externalUrl: result.externalUrl,
+          errorMessage: undefined,
+          publishedAt: new Date(),
+        },
+        $inc: { publishCount: 1 },
+      })
+      .exec();
+  }
+
+  /** Passe la Publication en ERROR (échec final d'un job). */
+  async markFailed(id: string, message: string): Promise<void> {
+    await this.publicationModel
+      .findByIdAndUpdate(id, {
+        $set: { status: PublicationStatus.ERROR, errorMessage: message },
+      })
+      .exec();
+  }
+
   /**
    * Delete a single publication : remove it on the platform side, then drop
    * the DB row on success / soft-success (already_gone). Returns the result
@@ -56,7 +124,7 @@ export class PublicationsService {
   async deletePlatformAndRow(
     pub: PublicationDocument,
   ): Promise<DeletePublicationResult> {
-    const account = await this.accountModel.findById(pub.accountId).exec();
+    const account = await this.accounts.getById(pub.accountId.toString());
     if (!account) {
       return {
         status: 'failed',
