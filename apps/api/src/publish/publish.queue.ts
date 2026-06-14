@@ -15,6 +15,12 @@ export interface PublishJobData {
   platform: Platform;
   /** Publication upsertée en PENDING au moment de l'enqueue. */
   publicationId: string;
+  /**
+   * - 'publish' (défaut) : publication simple (création).
+   * - 'bump' : remontée auto — on supprime d'abord l'annonce existante côté
+   *   marketplace avant de la recréer (pour qu'elle remonte en tête).
+   */
+  mode?: 'publish' | 'bump';
 }
 
 export interface PublishEvent {

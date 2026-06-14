@@ -2,7 +2,9 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
+  DEFAULT_BUMP_CONFIG,
   User,
+  UserBumpConfig,
   UserDefaultLocation,
   type UserDocument,
 } from './schemas/user.schema.js';
@@ -69,6 +71,47 @@ export class UsersService {
       .exec();
     if (!user) throw new NotFoundException('User not found');
     return user.defaultLocation;
+  }
+
+  // ─── Auto-bump (remontée automatique) ──────────────────────────────────────
+
+  /** Config de remontée du user (defaults si jamais configurée). 404 si absent. */
+  async getBumpConfig(id: string): Promise<UserBumpConfig> {
+    const user = await this.userModel
+      .findById(new Types.ObjectId(id))
+      .select('bumpConfig')
+      .lean()
+      .exec();
+    if (!user) throw new NotFoundException('User not found');
+    return user.bumpConfig ?? { ...DEFAULT_BUMP_CONFIG };
+  }
+
+  /** Écrit la config de remontée. 404 si user absent. */
+  async setBumpConfig(
+    id: string,
+    config: UserBumpConfig,
+  ): Promise<UserBumpConfig> {
+    const user = await this.userModel
+      .findByIdAndUpdate(
+        new Types.ObjectId(id),
+        { bumpConfig: config },
+        { new: true },
+      )
+      .select('bumpConfig')
+      .lean()
+      .exec();
+    if (!user) throw new NotFoundException('User not found');
+    return user.bumpConfig ?? { ...DEFAULT_BUMP_CONFIG };
+  }
+
+  /** Ids des users ayant la remontée activée (parcours par le scheduler). */
+  async findIdsWithBumpEnabled(): Promise<string[]> {
+    const users = await this.userModel
+      .find({ 'bumpConfig.enabled': true })
+      .select('_id')
+      .lean()
+      .exec();
+    return users.map((u) => u._id.toString());
   }
 
   /** Seed l'utilisateur par défaut si la collection est vide. Retourne true si créé. */

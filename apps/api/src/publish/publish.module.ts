@@ -5,6 +5,7 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { PublishController } from './publish.controller.js';
 import { PublishService } from './publish.service.js';
 import { PublishProcessor } from './publish.processor.js';
+import { PublishLockService } from './publish-lock.service.js';
 import { PublishEventBus } from './publish-event-bus.service.js';
 import { PUBLISH_QUEUE } from './publish.queue.js';
 import { PlatformPublishModule } from './platform-publish.module.js';
@@ -27,6 +28,12 @@ import { PublicationsModule } from '../publications/publications.module.js';
     PublicationsModule,
   ],
   controllers: [PublishController],
-  providers: [PublishService, PublishProcessor, PublishEventBus],
+  providers: [
+    PublishService,
+    PublishProcessor,
+    PublishLockService,
+    PublishEventBus,
+  ],
+  exports: [PublishService],
 })
 export class PublishModule {}

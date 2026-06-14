@@ -16,6 +16,7 @@ import { AccountsModule } from './accounts/accounts.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { MediaModule } from './media/media.module.js';
 import { PublishModule } from './publish/publish.module.js';
+import { BumpModule } from './bump/bump.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { SettingsModule } from './settings/settings.module.js';
@@ -55,6 +56,7 @@ import { UsersModule } from './users/users.module.js';
     SyncModule,
     MediaModule,
     PublishModule,
+    BumpModule,
     AuthModule,
     SettingsModule,
   ],

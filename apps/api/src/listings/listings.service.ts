@@ -39,6 +39,29 @@ export class ListingsService {
   }
 
   /**
+   * Réduit le prix de X% (remontée auto). Cumulatif sans plancher métier, mais
+   * garde-fou technique à 1€ — un prix ≤ 0 ferait échouer la publication
+   * marketplace. Arrondi à l'euro inférieur (pas de centimes) : garantit que le
+   * prix baisse réellement à chaque cycle, sinon un petit pourcentage sur un
+   * prix bas pourrait être annulé par l'arrondi supérieur. Retourne le nouveau
+   * prix. Appelé une seule fois par annonce par cycle de bump (pas par
+   * plateforme) pour éviter une double réduction.
+   */
+  async applyPriceReduction(id: string, percent: number): Promise<number> {
+    const listing = await this.listingModel
+      .findById(new Types.ObjectId(id))
+      .select('price')
+      .lean()
+      .exec();
+    if (!listing) throw new NotFoundException('Listing not found');
+    const reduced = Math.max(1, Math.floor(listing.price * (1 - percent / 100)));
+    await this.listingModel
+      .findByIdAndUpdate(id, { price: reduced })
+      .exec();
+    return reduced;
+  }
+
+  /**
    * Single aggregation pipeline : filter + sort (createdAt or computed
    * earliest publishedAt) + paginate + populate publications (with their
    * account summary). Only the S3 presign step lives outside Mongo.

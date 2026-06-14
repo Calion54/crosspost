@@ -14,6 +14,16 @@ import { AccountsService } from '../accounts/accounts.service.js';
 import { PlatformPublishDispatcher } from '../publish/platform-publish.dispatcher.js';
 import type { DeletePublicationResult } from '../publish/platform-publish.types.js';
 
+/** Une annonce due pour remontée + ses publications (1 par plateforme/compte). */
+export interface DueBumpListing {
+  listingId: string;
+  publications: {
+    publicationId: string;
+    accountId: string;
+    platform: Platform;
+  }[];
+}
+
 @Injectable()
 export class PublicationsService {
   private readonly logger = new Logger(PublicationsService.name);
@@ -40,6 +50,70 @@ export class PublicationsService {
 
   findByListing(listingId: string) {
     return this.publicationModel.find({ listingId }).exec();
+  }
+
+  /**
+   * Annonces dues pour une remontée auto (scheduler). Sélectionne les
+   * publications PUBLISHED dont l'annonce appartient au user, non vendue, et
+   * dont `publishedAt` (= date de dernière mise en ligne) dépasse le cutoff.
+   * Groupées par annonce (oldest first) pour appliquer la réduction de prix
+   * une seule fois par annonce et enqueue les plateformes en parallèle.
+   */
+  async findDueForBump(
+    userId: string,
+    cutoff: Date,
+    limit: number,
+  ): Promise<DueBumpListing[]> {
+    const rows = await this.publicationModel.aggregate<{
+      _id: Types.ObjectId;
+      publications: { publicationId: Types.ObjectId; accountId: Types.ObjectId; platform: Platform }[];
+    }>([
+      {
+        $match: {
+          status: PublicationStatus.PUBLISHED,
+          publishedAt: { $lte: cutoff },
+        },
+      },
+      {
+        $lookup: {
+          from: 'listings',
+          localField: 'listingId',
+          foreignField: '_id',
+          as: 'listing',
+        },
+      },
+      { $unwind: '$listing' },
+      {
+        $match: {
+          'listing.userId': new Types.ObjectId(userId),
+          'listing.sold': { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: '$listingId',
+          oldest: { $min: '$publishedAt' },
+          publications: {
+            $push: {
+              publicationId: '$_id',
+              accountId: '$accountId',
+              platform: '$platform',
+            },
+          },
+        },
+      },
+      { $sort: { oldest: 1 } },
+      { $limit: limit },
+    ]);
+
+    return rows.map((r) => ({
+      listingId: r._id.toString(),
+      publications: r.publications.map((p) => ({
+        publicationId: p.publicationId.toString(),
+        accountId: p.accountId.toString(),
+        platform: p.platform,
+      })),
+    }));
   }
 
   async findOne(id: string) {
@@ -103,6 +177,19 @@ export class PublicationsService {
           publishedAt: new Date(),
         },
         $inc: { publishCount: 1 },
+      })
+      .exec();
+  }
+
+  /**
+   * Remontée avortée : la suppression côté marketplace a échoué, l'annonce
+   * reste donc en ligne. On la repasse en PUBLISHED (elle l'est toujours) avec
+   * un message — sans toucher externalId/publishedAt/publishCount.
+   */
+  async markBumpSkipped(id: string, message: string): Promise<void> {
+    await this.publicationModel
+      .findByIdAndUpdate(id, {
+        $set: { status: PublicationStatus.PUBLISHED, errorMessage: message },
       })
       .exec();
   }

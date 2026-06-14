@@ -13,35 +13,44 @@ export class SettingsService {
   ) {}
 
   async getSettings(userId: string) {
-    const defaultLocation =
-      await this.usersService.getDefaultLocationOrThrow(userId);
-    return { defaultLocation };
+    const [defaultLocation, bump] = await Promise.all([
+      this.usersService.getDefaultLocationOrThrow(userId),
+      this.usersService.getBumpConfig(userId),
+    ]);
+    return { defaultLocation, bump };
   }
 
   async updateSettings(userId: string, dto: UpdateSettingsDto) {
-    // location non fournie → on ne touche pas à la valeur existante.
-    if (dto.location === undefined) {
-      const defaultLocation =
-        await this.usersService.getDefaultLocationOrThrow(userId);
-      return { defaultLocation };
+    // Chaque champ est optionnel : non fourni → valeur existante inchangée.
+    if (dto.bump !== undefined) {
+      await this.usersService.setBumpConfig(userId, dto.bump);
+      this.logger.log(
+        `Bump config mise à jour pour user ${userId} — ${
+          dto.bump.enabled
+            ? `tous les ${dto.bump.intervalDays}j, -${dto.bump.priceReductionPercent}%`
+            : 'désactivée'
+        }`,
+      );
     }
 
-    // La géolocalisation reste ici (logique métier Settings) ; la persistance
-    // passe par UsersService.
-    const location = await this.resolveLocation(dto.location);
-    const defaultLocation = await this.usersService.setDefaultLocation(
-      userId,
-      location,
-    );
+    if (dto.location !== undefined) {
+      // La géolocalisation reste ici (logique métier Settings) ; la persistance
+      // passe par UsersService.
+      const location = await this.resolveLocation(dto.location);
+      const defaultLocation = await this.usersService.setDefaultLocation(
+        userId,
+        location,
+      );
+      this.logger.log(
+        `Settings mis à jour pour user ${userId} — location: ${
+          defaultLocation
+            ? `${defaultLocation.city} (${defaultLocation.zipcode})`
+            : 'aucune'
+        }`,
+      );
+    }
 
-    this.logger.log(
-      `Settings mis à jour pour user ${userId} — location: ${
-        defaultLocation
-          ? `${defaultLocation.city} (${defaultLocation.zipcode})`
-          : 'aucune'
-      }`,
-    );
-    return { defaultLocation };
+    return this.getSettings(userId);
   }
 
   /** String libre → geocode (Google), objet structuré → utilisé direct. */

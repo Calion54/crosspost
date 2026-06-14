@@ -45,3 +45,6 @@ PublicationSchema.index(
   { listingId: 1, accountId: 1, platform: 1 },
   { unique: true },
 );
+
+// Requête du scheduler de remontée auto : publications dues par statut + date.
+PublicationSchema.index({ status: 1, publishedAt: 1 });

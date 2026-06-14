@@ -14,6 +14,7 @@ import { PlatformPublishDispatcher } from './platform-publish.dispatcher.js';
 import { PublishEventBus } from './publish-event-bus.service.js';
 import { PUBLISH_QUEUE, type PublishJobData } from './publish.queue.js';
 import type { PublishResult } from './platform-publish.types.js';
+import type { Platform } from '@crosspost/shared';
 
 /**
  * Orchestrateur publish générique, asynchrone via BullMQ (queue unique
@@ -100,9 +101,45 @@ export class PublishService {
   }
 
   /**
+   * Met en file un job de remontée (bump) : supprime l'annonce existante côté
+   * marketplace puis la recrée. Réutilise la queue `publish` (mode='bump').
+   * Appelé par le scheduler pour chaque publication due.
+   */
+  async enqueueBump(p: {
+    listingId: string;
+    accountId: string;
+    userId: string;
+    platform: Platform;
+  }): Promise<{ jobId: string; publicationId: string }> {
+    const publication = await this.publications.upsertPending({
+      listingId: p.listingId,
+      accountId: p.accountId,
+      platform: p.platform,
+    });
+    const publicationId = publication._id.toString();
+    const jobData: PublishJobData = { ...p, publicationId, mode: 'bump' };
+
+    const job = await this.queue.add('publish', jobData, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5_000 },
+    });
+
+    this.bus.emit({ type: 'queued', ...jobData });
+    this.logger.log(
+      `Bump job ${job.id} enqueued (listing=${p.listingId}, account=${p.accountId}, ${p.platform})`,
+    );
+
+    return { jobId: job.id ?? '', publicationId };
+  }
+
+  /**
    * Exécuté par le worker. Recharge le contexte, publie via la plateforme et
    * passe la Publication en PUBLISHED. Lève en cas d'échec → BullMQ retry, puis
    * `markFailed()` sur l'échec final.
+   *
+   * En mode 'bump', on supprime d'abord l'annonce existante côté marketplace.
+   * Si la suppression échoue (ex: article Vinted verrouillé), on annule la
+   * remontée pour NE PAS créer de doublon : l'annonce reste live (PUBLISHED).
    */
   async execute(data: PublishJobData): Promise<PublishResult> {
     const account = await this.accounts.getById(data.accountId);
@@ -118,11 +155,29 @@ export class PublishService {
       throw new Error('Aucune location par défaut configurée');
     }
 
-    this.logger.log(
-      `Publish "${listing.title}" sur ${account.platform} (${account.email})...`,
-    );
-
     const adapter = this.dispatcher.forPlatform(account.platform);
+
+    if (data.mode === 'bump') {
+      const pub = await this.publications.findOne(data.publicationId);
+      if (pub.externalId) {
+        const del = await adapter.deletePublication(account, pub);
+        if (del.status === 'failed') {
+          const message = `Remontée annulée — suppression impossible : ${del.message ?? 'erreur'}`;
+          this.logger.warn(`${account.platform} ${pub.externalId} : ${message}`);
+          await this.publications.markBumpSkipped(data.publicationId, message);
+          // Pas de throw : l'annonce reste en ligne, on réessaiera au prochain tick.
+          return { externalId: pub.externalId, externalUrl: pub.externalUrl ?? '' };
+        }
+      }
+      this.logger.log(
+        `Remontée "${listing.title}" sur ${account.platform} (${account.email})...`,
+      );
+    } else {
+      this.logger.log(
+        `Publish "${listing.title}" sur ${account.platform} (${account.email})...`,
+      );
+    }
+
     const result = await adapter.publish(account, listing, { defaultLocation });
 
     await this.publications.markPublished(data.publicationId, result);
